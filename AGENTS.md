@@ -4,10 +4,6 @@
 
 Quantization-Aware Fine-Tuning (QAFT) for 2-bit quaternary LLMs. See `PLAN.md` (VRAM/hardware planning) and `RESEARCH.md` (mathematical formulation).
 
-## Status
-
-Pre-initialization → code landing. Core modules written, Qwen2.5-0.5B sandbox confirmed to fit on T4/P100.
-
 ## Repository Structure
 
 Files are **flat at root** (no package directory) — required by Kaggle Dataset flattening.
@@ -19,7 +15,7 @@ Files are **flat at root** (no package directory) — required by Kaggle Dataset
 | `train.py` | `QAFTTrainer` — training loop, checkpointing, AMP, cosine LR |
 | `eval.py` | `evaluate_perplexity()` — no-grad PPL on a DataLoader |
 | `config.py` | `QAFTConfig` dataclass |
-| `notebooks/qaft_demo.ipynb` | Self-contained Colab/Kaggle notebook entrypoint |
+| `notebooks/qaft_demo.ipynb` | Self-contained Colab notebook entrypoint |
 | `tests/` | `test_quantize.py`, `test_model.py` |
 
 ## Key Design Decisions
@@ -42,7 +38,7 @@ pytest tests/ -v
 jupyter notebook notebooks/qaft_demo.ipynb
 ```
 
-On Kaggle: upload code as Dataset → add to notebook → `sys.path.insert(0, '/kaggle/input/tetraft')` → import directly.
+On Colab: upload repo folder to Drive → open notebook → run all.
 
 ## Architecture Notes
 

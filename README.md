@@ -2,32 +2,22 @@
 
 Quantization-Aware Fine-Tuning for 2-bit Quaternary LLMs.
 
-## Quickstart
+## Quickstart (Google Colab)
+
+1. Push this repo to `YOUR_USERNAME/tetraft` on GitHub
+2. Open `notebooks/qaft_demo.ipynb` in [Google Colab](https://colab.research.google.com)
+3. In cell 1, replace `YOUR_USERNAME` with your GitHub username
+4. Select **Runtime → Change runtime type → T4 GPU**
+5. **Runtime → Run all**
+
+See `COLAB_GUIDE.md` for detailed instructions.
+
+### Local Development
 
 ```bash
-pip install -e .
-```
-
-Then open and run the notebook:
-
-```bash
+pip install pytest
+pytest tests/ -v
 jupyter notebook notebooks/qaft_demo.ipynb
-```
-
-Or open it directly in [Google Colab](https://colab.research.google.com/) — just
-clone the repo first:
-
-```
-!git clone https://github.com/YOUR_USER/tetraft.git
-%cd tetraft
-!pip install -e .
-```
-
-### Tests
-
-```bash
-pip install -e ".[dev]"
-pytest tests/
 ```
 
 ## What it does
@@ -43,3 +33,4 @@ pytest tests/
 - `PLAN.md` — VRAM budgeting & hardware planning
 - `RESEARCH.md` — Mathematical formulation
 - `AGENTS.md` — Agent instructions for OpenCode
+- `COLAB_GUIDE.md` — Running on Google Colab
