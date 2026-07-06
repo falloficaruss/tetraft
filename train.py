@@ -41,7 +41,7 @@ class QAFTTrainer:
             num_training_steps=config.max_steps,
         )
 
-        self.scaler = torch.cuda.amp.GradScaler(enabled=torch.cuda.is_available())
+        self.scaler = torch.amp.GradScaler('cuda', enabled=torch.cuda.is_available())
 
         self.global_step = 0
         self.total_loss = 0.0
@@ -58,7 +58,7 @@ class QAFTTrainer:
 
                 batch = {k: v.to(self.device) for k, v in batch.items()}
 
-                with torch.cuda.amp.autocast(enabled=torch.cuda.is_available()):
+                with torch.amp.autocast('cuda', enabled=torch.cuda.is_available()):
                     outputs = self.model(**batch)
                     loss = outputs.loss
 
