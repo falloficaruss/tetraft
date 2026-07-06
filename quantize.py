@@ -37,7 +37,7 @@ class QuantizeFunction(torch.autograd.Function):
         q = torch.where(x >= t, 1.0, q)
 
         grad_weight = grad_output * sat_mask
-        grad_scale = (grad_output * q * torch.sign(scale)).sum()
+        grad_scale = (grad_output * (q - x.detach()) * torch.sign(scale)).mean()
         return grad_weight, grad_scale, None
 
 
