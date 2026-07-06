@@ -5,7 +5,7 @@ import torch
 from torch.optim import AdamW
 from transformers import get_linear_schedule_with_warmup
 
-from .eval import evaluate_perplexity
+from eval import evaluate_perplexity
 
 logger = logging.getLogger(__name__)
 

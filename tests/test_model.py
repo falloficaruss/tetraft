@@ -2,8 +2,8 @@ import torch
 import torch.nn as nn
 import pytest
 
-from tetraft.quantize import QuantizedLinear
-from tetraft.model import replace_linear_layers
+from quantize import QuantizedLinear
+from model import replace_linear_layers
 
 
 class _DummyBlock(nn.Module):

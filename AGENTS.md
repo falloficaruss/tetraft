@@ -10,19 +10,21 @@ Pre-initialization → code landing. Core modules written, Qwen2.5-0.5B sandbox 
 
 ## Repository Structure
 
-| Path | Purpose |
+Files are **flat at root** (no package directory) — required by Kaggle Dataset flattening.
+
+| File | Purpose |
 |---|---|
-| `src/tetraft/quantize.py` | `QuantizeFunction` (autograd STE) + `QuantizedLinear` (nn.Module) |
-| `src/tetraft/model.py` | `replace_linear_layers()` — walks modules, swaps `nn.Linear` → `QuantizedLinear` |
-| `src/tetraft/train.py` | `QAFTTrainer` — training loop, checkpointing, AMP, cosine LR |
-| `src/tetraft/eval.py` | `evaluate_perplexity()` — no-grad PPL on a DataLoader |
-| `src/tetraft/config.py` | `QAFTConfig` dataclass |
+| `quantize.py` | `QuantizeFunction` (autograd STE) + `QuantizedLinear` (nn.Module) |
+| `model.py` | `replace_linear_layers()` — walks modules, swaps `nn.Linear` → `QuantizedLinear` |
+| `train.py` | `QAFTTrainer` — training loop, checkpointing, AMP, cosine LR |
+| `eval.py` | `evaluate_perplexity()` — no-grad PPL on a DataLoader |
+| `config.py` | `QAFTConfig` dataclass |
 | `notebooks/qaft_demo.ipynb` | Self-contained Colab/Kaggle notebook entrypoint |
 | `tests/` | `test_quantize.py`, `test_model.py` |
 
 ## Key Design Decisions
 
-- **Notebook-first interface.** The library is pip-installable but the primary entrypoint is `notebooks/qaft_demo.ipynb`.
+- **Notebook-first interface.** The library modules are flat (.py files at root). Import directly: `from config import QAFTConfig`.
 - **Raw PyTorch training.** No HF `Trainer`. `QAFTTrainer` uses `AdamW` + linear warmup schedule + `GradScaler`.
 - **Quaternary grid** `{-1, -c, c, 1}`, default `c=0.5`. Adjustable per layer via `QuantizedLinear(c=...)`.
 - **STE backward** clips gradients for `|W/γ| > 1.0` (saturated weights frozen).
@@ -32,18 +34,15 @@ Pre-initialization → code landing. Core modules written, Qwen2.5-0.5B sandbox 
 ## Commands
 
 ```bash
-# install
-pip install -e .
-
-# run tests
-pip install -e ".[dev]"
+# run tests (root must be on Python path)
+pip install pytest
 pytest tests/ -v
 
 # launch notebook
 jupyter notebook notebooks/qaft_demo.ipynb
 ```
 
-On Colab/Kaggle: clone repo, `pip install -e .`, open notebook.
+On Kaggle: upload code as Dataset → add to notebook → `sys.path.insert(0, '/kaggle/input/tetraft')` → import directly.
 
 ## Architecture Notes
 

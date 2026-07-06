@@ -1,17 +1,8 @@
-[build-system]
-requires = ["setuptools>=68.0"]
-build-backend = "setuptools.build_meta"
-
 [project]
 name = "tetraft"
 version = "0.1.0"
 description = "Quantization-Aware Fine-Tuning for 2-bit Quaternary LLMs"
 requires-python = ">=3.10"
-dependencies = [
-    "torch>=2.0",
-    "transformers>=4.35",
-    "accelerate>=0.24",
-]
 
 [project.optional-dependencies]
 dev = ["pytest"]

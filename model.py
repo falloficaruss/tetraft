@@ -1,6 +1,6 @@
 import torch.nn as nn
 
-from .quantize import QuantizedLinear
+from quantize import QuantizedLinear
 
 
 def replace_linear_layers(

@@ -1,7 +1,7 @@
 import torch
 import pytest
 
-from tetraft.quantize import QuantizeFunction, QuantizedLinear
+from quantize import QuantizeFunction, QuantizedLinear
 
 
 class TestQuantizeFunction:
