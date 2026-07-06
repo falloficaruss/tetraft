@@ -34,6 +34,7 @@ def _replace_in_module(module, c, skip_names):
                 c=c,
             )
             qlinear.weight.data = child.weight.data.clone().to(child.weight.dtype)
+            qlinear.scale.data = child.weight.data.abs().max().detach()
             if child.bias is not None:
                 qlinear.bias.data = child.bias.data.clone()
             setattr(module, name, qlinear)
