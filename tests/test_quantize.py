@@ -1,99 +1,56 @@
 import torch
 import pytest
 
-from quantize import QuantizeFunction, QuantizedLinear
+import torch.nn.functional as F
+
+from quantize import quaternary_quant, QuantizedLinear
 
 
-class TestQuantizeFunction:
-    def test_forward_returns_quaternary_values(self):
-        w = torch.tensor([[-2.0, -0.8, -0.1, 0.1, 0.8, 2.0]], dtype=torch.float32)
-        scale = torch.tensor([1.0])
-        c = 0.5
-        t = (1.0 + c) / 2.0
+class TestQuaternaryQuant:
+    def test_quant_returns_quaternary_values(self):
+        w = torch.tensor([[-2.0, -0.7, -0.3, 0.3, 0.7, 2.0]], dtype=torch.float32)
+        scale = w.abs().max()
+        c = 0.25
+        q = quaternary_quant(w, c, scale)
 
-        q = QuantizeFunction.apply(w, scale, c)
+        # x = w / scale = [-1.0, -0.35, -0.15, 0.15, 0.35, 1.0]
+        # t = (1+0.25)/2 = 0.625
+        # -1.0 < -t → -1.0 * scale = -2.0
+        # -0.35 in [-t, 0) → -c * scale = -0.5
+        # -0.15 in [-t, 0) → -c * scale = -0.5
+        # 0.15 in [0, t) → c * scale = 0.5
+        # 0.35 in [0, t) → c * scale = 0.5
+        # 1.0 >= t → 1.0 * scale = 2.0
+        expected = torch.tensor([[-2.0, -0.5, -0.5, 0.5, 0.5, 2.0]])
+        assert torch.equal(q, expected)
 
-        assert q.shape == w.shape
-        assert q.dtype == w.dtype
-
-        # scale=1.0 so q values = quantized x directly
-        # -2.0 < -t -> -1.0
-        # -0.8 < -t -> -1.0
-        # -t <= -0.1 < 0 -> -c
-        # 0 <= 0.1 < t -> c
-        # 0.8 >= t -> 1.0
-        # 2.0 >= t -> 1.0
-        assert q[0, 0] == -1.0
-        assert q[0, 1] == -1.0
-        assert q[0, 2] == -c
-        assert q[0, 3] == c
-        assert q[0, 4] == 1.0
-        assert q[0, 5] == 1.0
-
-    def test_forward_all_values_in_quaternary_grid(self):
+    def test_quant_all_values_in_quaternary_grid(self):
         w = torch.randn(10, 10) * 2
-        scale = torch.tensor([1.0])
-        c = 0.5
-        q = QuantizeFunction.apply(w, scale, c)
+        scale = w.abs().max()
+        c = 0.25
+        q = quaternary_quant(w, c, scale)
 
-        unique = torch.unique(q.round(decimals=6))
+        q_scaled = q / scale
+        unique = torch.unique(q_scaled.round(decimals=6))
         for val in unique.tolist():
             assert val in (-1.0, -c, c, 1.0), f"Unexpected quantized value: {val}"
-
-    def test_ste_backward_passes_through_for_small_weights(self):
-        w = torch.randn(5, 5, requires_grad=True)
-        scale = torch.tensor([1.0])
-        c = 0.5
-        t = (1.0 + c) / 2.0
-
-        q = QuantizeFunction.apply(w, scale, c)
-        loss = q.sum()
-        loss.backward()
-
-        mask = (w.abs() <= t).float()
-
-        assert w.grad is not None
-        assert torch.allclose(w.grad, mask, atol=1e-6)
-
-    def test_ste_backward_clips_saturated_weights(self):
-        w = torch.tensor([[0.5, 5.0]], requires_grad=True)
-        scale = torch.tensor([1.0])
-        c = 0.5
-
-        q = QuantizeFunction.apply(w, scale, c)
-        loss = q.sum()
-        loss.backward()
-
-        # scale=1.0, t=0.75 -> |0.5| <= 0.75 (grad=1), |5.0| > 0.75 (grad=0)
-        assert w.grad[0, 0].item() == 1.0
-        assert w.grad[0, 1].item() == 0.0
-
-    def test_backward_with_different_c(self):
-        for c in (0.25, 0.5):
-            w = torch.randn(5, 5, requires_grad=True)
-            scale = torch.tensor([1.0])
-            q = QuantizeFunction.apply(w, scale, c)
-            loss = q.sum()
-            loss.backward()
-            assert w.grad is not None
-            assert not torch.isnan(w.grad).any()
 
 
 class TestQuantizedLinear:
     def test_forward_output_shape(self):
-        layer = QuantizedLinear(64, 128, bias=True, c=0.5)
+        layer = QuantizedLinear(64, 128, bias=True, c=0.25)
         x = torch.randn(2, 16, 64)
         out = layer(x)
         assert out.shape == (2, 16, 128)
 
     def test_forward_no_bias(self):
-        layer = QuantizedLinear(64, 128, bias=False, c=0.5)
+        layer = QuantizedLinear(64, 128, bias=False, c=0.25)
         x = torch.randn(2, 16, 64)
         out = layer(x)
         assert out.shape == (2, 16, 128)
 
     def test_backward_computes_gradients(self):
-        layer = QuantizedLinear(64, 128, bias=True, c=0.5)
+        layer = QuantizedLinear(64, 128, bias=True, c=0.25)
         x = torch.randn(2, 16, 64, requires_grad=True)
         out = layer(x)
         loss = out.sum()
@@ -107,17 +64,45 @@ class TestQuantizedLinear:
         assert not torch.isnan(layer.weight.grad).any()
         assert not torch.isnan(x.grad).any()
 
+    def test_backward_grads_flow_through_all_weights(self):
+        layer = QuantizedLinear(32, 32, bias=False, c=0.25)
+        x = torch.randn(4, 32)
+        out = layer(x)
+        loss = out.sum()
+        loss.backward()
+
+        # With detach() STE, NO weights are frozen
+        assert (layer.weight.grad != 0).all()
+
     def test_weight_copy_preserves_values(self):
         ref = torch.nn.Linear(32, 64)
-        qlayer = QuantizedLinear(32, 64, bias=True, c=0.5)
+        qlayer = QuantizedLinear(32, 64, bias=True, c=0.25)
         qlayer.weight.data = ref.weight.data.clone()
         qlayer.bias.data = ref.bias.data.clone()
 
         assert torch.equal(qlayer.weight, ref.weight)
         assert torch.equal(qlayer.bias, ref.bias)
 
+    def test_lambda_zero_disables_quantization(self):
+        layer = QuantizedLinear(32, 32, bias=False, c=0.25)
+        layer.lambda_ = 0.0
+        x = torch.randn(4, 32)
+        ref = F.linear(x, layer.weight)
+        out = layer(x)
+        # With lambda=0, forward is pure FP32
+        assert torch.equal(out, ref)
+
+    def test_lambda_one_applies_full_quantization(self):
+        layer = QuantizedLinear(32, 32, bias=False, c=0.25)
+        layer.lambda_ = 1.0
+        x = torch.randn(4, 32)
+        out = layer(x)
+        # Output should differ from pure FP32 (quantization changes it)
+        ref = F.linear(x, layer.weight)
+        assert not torch.equal(out, ref)
+
     def test_training_step_updates_weights(self):
-        layer = QuantizedLinear(32, 32, bias=False, c=0.5)
+        layer = QuantizedLinear(32, 32, bias=False, c=0.25)
         opt = torch.optim.SGD(layer.parameters(), lr=1.0)
 
         x = torch.randn(4, 32)
@@ -130,5 +115,4 @@ class TestQuantizedLinear:
             loss.backward()
             opt.step()
 
-        # Weight should have changed
         assert not torch.allclose(layer.weight, torch.zeros_like(layer.weight), atol=1e-3)

@@ -5,6 +5,7 @@ import torch
 from torch.optim import AdamW
 from transformers import get_linear_schedule_with_warmup
 
+from quantize import QuantizedLinear
 from eval import evaluate_perplexity
 
 logger = logging.getLogger(__name__)
@@ -57,6 +58,12 @@ class QAFTTrainer:
                     break
 
                 batch = {k: v.to(self.device) for k, v in batch.items()}
+
+                if self.config.quant_warmup:
+                    lambda_val = min(2.0 * self.global_step / self.config.max_steps, 1.0)
+                    for module in self.model.modules():
+                        if isinstance(module, QuantizedLinear):
+                            module.lambda_ = lambda_val
 
                 with torch.amp.autocast('cuda', enabled=torch.cuda.is_available()):
                     outputs = self.model(**batch)

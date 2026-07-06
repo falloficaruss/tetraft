@@ -5,8 +5,8 @@ from typing import Optional
 @dataclass
 class QAFTConfig:
     model_name: str = "Qwen/Qwen2.5-0.5B"
-    quaternary_c: float = 0.5
-    learning_rate: float = 2e-5
+    quaternary_c: float = 0.25
+    learning_rate: float = 1e-4
     batch_size: int = 4
     seq_length: int = 1024
     max_steps: int = 1000
@@ -19,6 +19,7 @@ class QAFTConfig:
     gradient_checkpointing: bool = True
     skip_lm_head: bool = True
     skip_embed_tokens: bool = True
+    quant_warmup: bool = True
     max_grad_norm: float = 1.0
     num_epochs: int = 1
     dataloader_num_workers: int = 0
