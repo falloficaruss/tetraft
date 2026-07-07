@@ -42,6 +42,8 @@ class QuantizedLinear(nn.Module):
         scale = self.weight.abs().max().detach().clamp(min=1e-5)
         w_q = quaternary_quant(self.weight, self.c, scale)
         w = self.weight + self.lambda_ * (w_q - self.weight).detach()
+        if self.lambda_ < 1.0 and self.training:
+            w = w.detach()
         return F.linear(x, w, self.bias)
 
     def extra_repr(self):
