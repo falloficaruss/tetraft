@@ -47,6 +47,7 @@ class QAFTTrainer:
         self.global_step = 0
         self.total_loss = 0.0
         self.best_perplexity = float("inf")
+        self.metrics = {"step": [], "loss": [], "lr": [], "perplexity": []}
 
     def train(self, train_dataloader, eval_dataloader=None):
         self.model.train()
@@ -88,6 +89,9 @@ class QAFTTrainer:
                 if self.global_step % self.config.logging_steps == 0:
                     avg_loss = self.total_loss / self.config.logging_steps
                     lr = self.scheduler.get_last_lr()[0]
+                    self.metrics["step"].append(self.global_step)
+                    self.metrics["loss"].append(avg_loss)
+                    self.metrics["lr"].append(lr)
                     logger.info(f"Step {self.global_step}: loss={avg_loss:.4f}, lr={lr:.2e}")
                     self.total_loss = 0.0
 
@@ -104,6 +108,7 @@ class QAFTTrainer:
 
     def _evaluate(self, dataloader, max_batches=5):
         ppl = evaluate_perplexity(self.model, dataloader, max_batches=max_batches)
+        self.metrics["perplexity"].append((self.global_step, ppl))
         logger.info(f"Step {self.global_step}: perplexity={ppl:.2f}")
         return ppl
 
