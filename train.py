@@ -60,7 +60,7 @@ class QAFTTrainer:
                 batch = {k: v.to(self.device) for k, v in batch.items()}
 
                 if self.config.quant_warmup:
-                    lambda_val = min(2.0 * self.global_step / self.config.max_steps, 1.0)
+                    lambda_val = min(4.0 * self.global_step / self.config.max_steps, 1.0)
                     for module in self.model.modules():
                         if isinstance(module, QuantizedLinear):
                             module.lambda_ = lambda_val
@@ -79,8 +79,8 @@ class QAFTTrainer:
                     torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config.max_grad_norm)
                     self.scaler.step(self.optimizer)
                     self.scaler.update()
-                    self.scheduler.step()
                     self.optimizer.zero_grad()
+                self.scheduler.step()
 
                 self.total_loss += loss.item() * self.config.gradient_accumulation_steps
                 self.global_step += 1

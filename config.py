@@ -6,7 +6,7 @@ from typing import Optional
 class QAFTConfig:
     model_name: str = "Qwen/Qwen2.5-0.5B"
     quaternary_c: float = 0.25
-    learning_rate: float = 1e-4
+    learning_rate: float = 5e-5
     batch_size: int = 4
     seq_length: int = 1024
     max_steps: int = 1000
