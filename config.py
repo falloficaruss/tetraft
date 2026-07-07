@@ -9,8 +9,8 @@ class QAFTConfig:
     learning_rate: float = 5e-5
     batch_size: int = 4
     seq_length: int = 1024
-    max_steps: int = 1000
-    warmup_steps: int = 100
+    max_steps: int = 500
+    warmup_steps: int = 50
     gradient_accumulation_steps: int = 2
     logging_steps: int = 10
     eval_steps: int = 100

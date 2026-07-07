@@ -38,11 +38,9 @@ class QAFTTrainer:
 
         self.scheduler = get_linear_schedule_with_warmup(
             self.optimizer,
-            num_warmup_steps=config.warmup_steps,
-            num_training_steps=config.max_steps,
+            num_warmup_steps=config.warmup_steps // config.gradient_accumulation_steps,
+            num_training_steps=config.max_steps // config.gradient_accumulation_steps,
         )
-
-        self.scaler = torch.amp.GradScaler('cuda', enabled=torch.cuda.is_available())
 
         self.global_step = 0
         self.total_loss = 0.0
@@ -66,22 +64,19 @@ class QAFTTrainer:
                         if isinstance(module, QuantizedLinear):
                             module.lambda_ = lambda_val
 
-                with torch.amp.autocast('cuda', enabled=torch.cuda.is_available()):
-                    outputs = self.model(**batch)
-                    loss = outputs.loss
+                outputs = self.model(**batch)
+                loss = outputs.loss
 
                 if self.config.gradient_accumulation_steps > 1:
                     loss = loss / self.config.gradient_accumulation_steps
 
-                self.scaler.scale(loss).backward()
+                loss.backward()
 
                 if (self.global_step + 1) % self.config.gradient_accumulation_steps == 0:
-                    self.scaler.unscale_(self.optimizer)
                     torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config.max_grad_norm)
-                    self.scaler.step(self.optimizer)
-                    self.scaler.update()
+                    self.optimizer.step()
+                    self.scheduler.step()
                     self.optimizer.zero_grad()
-                self.scheduler.step()
 
                 self.total_loss += loss.item() * self.config.gradient_accumulation_steps
                 self.global_step += 1
