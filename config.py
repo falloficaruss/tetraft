@@ -6,11 +6,11 @@ from typing import Optional
 class QAFTConfig:
     model_name: str = "Qwen/Qwen2.5-0.5B"
     quaternary_c: float = 0.25
-    learning_rate: float = 5e-5
+    learning_rate: float = 2e-4
     batch_size: int = 4
     seq_length: int = 1024
-    max_steps: int = 500
-    warmup_steps: int = 50
+    max_steps: int = 5000
+    warmup_steps: int = 500
     gradient_accumulation_steps: int = 2
     logging_steps: int = 10
     eval_steps: int = 100
