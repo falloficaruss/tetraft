@@ -1,20 +1,183 @@
-Project TetraFT (Quantization-Aware Fine-Tuning for 2-Bit Quaternary LLMs)
-I am starting a new, independent research track focused on Quantization-Aware Fine-Tuning (QAFT). The goal of this project, codenamed TetraFT, is to take an existing, pre-trained full-precision (FP16/BF16) Transformer model (e.g., GPT-2 or a tiny Llama variant) and surgically convert its linear layers into a multiplier-free, 2-bit quaternary format.
-By utilizing a 4-state quaternary grid instead of BitNet's 3-state ternary grid, we want to prove that the extra representation capacity dramatically minimizes "representation shock" during the initial phase of fine-tuning, allowing the model to retain its pre-trained knowledge while compressing its disk footprint by up to 87.5%.
+# TetraFT — Method & Mathematical Formulation
 
-1. Mathematical Formulation
-We represent our quaternary weights using a symmetric 4-state grid mapped to the set $\{-1, -c, c, 1\}$, where $c$ is a fixed, hardware-native power-of-two scaling parameter ($c = 0.25$ or $c = 0.5$).
-Let $W$ be the continuous latent weight matrix initialized from a pre-trained layer. The forward pass quantization function $Q(W)$ is defined as:
-$$Q(W) = \gamma \cdot \text{sign\_segment}\left( \frac{W}{\gamma} \right)$$
-Where $\gamma$ is the scale factor (Mean Absolute Value of the weights):
-$$\gamma = \frac{1}{d_{\text{out}} \cdot d_{\text{in}}} \sum_{i,j} |W_{i,j}|$$
-And the segmentation function maps the normalized weight $x = \frac{W}{\gamma}$ to the discrete grid:
-$$\text{sign\_segment}(x) = \begin{cases} 
--1.0 & \text{if } x < -\frac{1+c}{2} \\
--c & \text{if } -\frac{1+c}{2} \le x < 0 \\
-c & \text{if } 0 \le x < \frac{1+c}{2} \\
-1.0 & \text{if } x \ge \frac{1+c}{2}
-\end{cases}$$
-The Backward Pass (Straight-Through Estimator):
-During backpropagation, we bypass the zero-derivative of the step function. The gradient of the loss $\mathcal{L}$ passes directly through to the continuous latent weights $W$, but we clamp gradient flow for saturated weights where $|x| > 1.0$ to ensure stability:
-$$\frac{\partial \mathcal{L}}{\partial W} \approx \frac{\partial \mathcal{L}}{\partial Q(W)} \cdot \mathbb{I}(|x| \le 1.0)$$
+**Status:** source of truth for the quantizer design. Implementation must match this file.
+
+## Goal
+
+Convert a **pretrained** full-precision LLM into **2-bit quaternary** linear weights via **quantization-aware fine-tuning (QAFT)**, then **heal** so the model approaches the **original checkpoint** on language modeling and downstream tasks.
+
+This is **conversion QAFT**, not from-scratch pretraining. Design choices optimize the **quaternary grid** \(\{-1,-c,c,1\}\) and recovery to the original—not a copy of BitNet ternary training.
+
+BitNet / b1.58 is **related work only** (motivation for extreme discrete weights + STE). It is not an experimental competitor.
+
+---
+
+## 1. Quaternary grid
+
+Weights on each quantized linear layer use a symmetric 4-level set:
+
+\[
+\mathcal{G}_c = \{-1,\,-c,\,c,\,1\}
+\]
+
+with fixed design parameter \(c \in (0,1)\).
+
+| Default | Notes |
+|---------|--------|
+| **\(c = 0.25\)** | Primary default (power-of-two friendly) |
+| \(c = 0.5\) | Ablation (more even spacing under some scales) |
+| Learnable \(c\) | Optional later experiment |
+
+There is **no explicit zero**. Mid-magnitude capacity is carried by \(\pm c\).
+
+---
+
+## 2. Forward quantization \(Q(W)\)
+
+Let \(W \in \mathbb{R}^{d_{\mathrm{out}} \times d_{\mathrm{in}}}\) be the **latent** (trainable) full-precision weights, initialized from the pretrained layer.
+
+### 2.1 Scale \(\gamma\) (default)
+
+**Default:** per-output-channel absmean (recommended for conversion):
+
+\[
+\gamma_i = \frac{1}{d_{\mathrm{in}}} \sum_{j=1}^{d_{\mathrm{in}}} |W_{i,j}| + \varepsilon, \quad i = 1,\ldots,d_{\mathrm{out}}
+\]
+
+**Ablations (config-selectable):**
+
+| `scale_mode` | Definition |
+|--------------|------------|
+| `absmean_channel` | above (default) |
+| `absmean_tensor` | \(\gamma = \mathrm{mean}(|W|) + \varepsilon\) (scalar) |
+| `absmax_channel` | \(\gamma_i = \max_j |W_{i,j}| + \varepsilon\) |
+| `absmax_tensor` | \(\gamma = \max |W| + \varepsilon\) |
+
+\(\varepsilon = 10^{-5}\) (clamp). Compute \(\gamma\) in FP32; do not backprop through \(\gamma\) (detach).
+
+### 2.2 Segmentation
+
+Normalize \(x = W / \gamma\) (broadcast \(\gamma\)). Threshold:
+
+\[
+t = \frac{1+c}{2}
+\]
+
+\[
+\mathrm{sign\_segment}(x) =
+\begin{cases}
+-1 & x < -t \\
+-c & -t \le x < 0 \\
+\;c & 0 \le x < t \\
+\;1 & x \ge t
+\end{cases}
+\]
+
+\[
+Q(W) = \gamma \cdot \mathrm{sign\_segment}(W / \gamma)
+\]
+
+---
+
+## 3. Straight-through estimator (STE) and \(\lambda\)-anneal
+
+### 3.1 Soft quantization strength \(\lambda \in [0,1]\)
+
+Forward (training):
+
+\[
+\widetilde{W} = W + \lambda \cdot \mathrm{stopgrad}\big(Q(W) - W\big)
+\]
+
+Then \(\mathrm{Linear}(x) = x\,\widetilde{W}^\top + b\) (bias stays full precision).
+
+| \(\lambda\) | Behavior |
+|-------------|----------|
+| \(0\) | Pure latent FP forward (no quant) |
+| \(1\) | Full discrete forward |
+
+**Default schedule:** linear ramp over the first fraction of steps, e.g.
+
+\[
+\lambda(s) = \min\!\left(1,\; \frac{s}{s_{\mathrm{quant\_warmup}}}\right)
+\]
+
+with `quant_warmup` enabled by default. Ablate hard quant from step 0 and delayed ramps.
+
+### 3.2 STE modes (`ste_mode`)
+
+Gradients flow to latent \(W\) through the STE path of \(\widetilde{W}\).
+
+| Mode | Backward approx |
+|------|-----------------|
+| `identity` (default to implement first) | \(\partial\mathcal{L}/\partial W \approx \partial\mathcal{L}/\partial\widetilde{W}\) |
+| `clip` | \(\partial\mathcal{L}/\partial W \approx (\partial\mathcal{L}/\partial\widetilde{W}) \odot \mathbb{I}(|W/\gamma| \le 1)\) |
+
+Choose by recovery stability on 0.8B, not by external papers.
+
+---
+
+## 4. What gets quantized
+
+Replace eligible `nn.Linear` with `QuantizedLinear`.
+
+**Always skip (v1):**
+
+- `lm_head` (and tied output if separate)
+- token embeddings (`embed_tokens` / equivalent)
+- vision tower / multimodal encoder
+- MTP or auxiliary heads if present
+- norms (not Linear)
+
+**Language body (Qwen3.5 hybrid):** FFN, full gated attention projections, Gated DeltaNet projections — **module-scope is an ablation**. Start with all eligible language Linears; if unstable, FFN-first.
+
+Report **% parameters quantized** every run.
+
+---
+
+## 5. Training objective (recovery)
+
+**Primary:** causal LM cross-entropy on continual pretraining data (FineWeb-Edu sample).
+
+**Optional (if CE plateaus):** KL distillation toward a **frozen original** teacher on the same tokens.
+
+Do **not** start with chat-only SFT for the main recovery claim.
+
+---
+
+## 6. Evaluation (parity with original)
+
+Always evaluate under the **same** protocol as the frozen original:
+
+1. **Held-out PPL** (fixed val split)
+2. **Shock:** PPL at \(\lambda=1\), zero training steps vs original
+3. **Recovery curves:** PPL vs tokens
+4. Later: downstream suite (lm-eval); always include an **Original** column
+
+Parity metrics:
+
+- \(\mathrm{PPL}_Q / \mathrm{PPL}_{\mathrm{orig}}\)
+- Relative task scores \(\mathrm{acc}_Q / \mathrm{acc}_{\mathrm{orig}}\) when downstream is enabled
+
+---
+
+## 7. Design principles (quaternary-optimal)
+
+1. Optimize **gap to original**, not similarity to ternary methods.
+2. Prefer scales/thresholds that fit **pretrained weight histograms**.
+3. Use \(\lambda\)-anneal and module scope as first-class conversion tools.
+4. Activation quantization / custom kernels are **out of scope for v1 capability runs**.
+5. Keep equations, `config.py` defaults, and tests aligned.
+
+---
+
+## 8. Known code debt (must fix in Phase 0)
+
+| Spec (this file) | Current code (as of plan freeze) |
+|------------------|----------------------------------|
+| Default absmean channel | `absmax` tensor |
+| Default \(c=0.25\) everywhere | split 0.25 / 0.5 defaults |
+| Optional STE clip | identity STE only via detach |
+| Selective module policy | mostly blind Linear replace + lm_head skip |
+
+Phase 0 resolves this table. See `RESEARCH_PLAN.md`.

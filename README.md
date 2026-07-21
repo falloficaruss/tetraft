@@ -1,36 +1,52 @@
 # TetraFT
 
-Quantization-Aware Fine-Tuning for 2-bit Quaternary LLMs.
+**Quantization-Aware Fine-Tuning** for **2-bit quaternary** LLMs.
 
-## Quickstart (Google Colab)
+Convert a pretrained model to weights on \(\{-1,-c,c,1\}\), then heal so performance approaches the **original** full-precision model.
 
-1. Push this repo to `YOUR_USERNAME/tetraft` on GitHub
-2. Open `notebooks/qaft_demo.ipynb` in [Google Colab](https://colab.research.google.com)
-3. In cell 1, replace `YOUR_USERNAME` with your GitHub username
-4. Select **Runtime → Change runtime type → T4 GPU**
-5. **Runtime → Run all**
+## Research docs (read in order)
 
-See `COLAB_GUIDE.md` for detailed instructions.
+| File | Contents |
+|------|----------|
+| [`RESEARCH.md`](RESEARCH.md) | Mathematical formulation & method (code must match) |
+| [`PLAN.md`](PLAN.md) | Models, FineWeb-Edu data, VRAM, Kaggle |
+| [`RESEARCH_PLAN.md`](RESEARCH_PLAN.md) | Phases, experiments, paper plan — **start at Phase 0** |
+| [`AGENTS.md`](AGENTS.md) | Conventions for coding agents |
 
-### Local Development
+## Locked defaults
+
+- **First model:** `Qwen/Qwen3.5-0.8B-Base` → later `Qwen3.5-2B-Base`
+- **Grid:** \(c=0.25\), scale `absmean_channel`
+- **Data:** fixed FineWeb-Edu sample (Kaggle Dataset; not in repo)
+- **Platform:** Kaggle
+- **Success:** gap to original model (not BitNet comparison)
+
+## Current step
+
+**Phase 0** — align quantizer / replace / config / tests with `RESEARCH.md`.  
+See `RESEARCH_PLAN.md` §3 Phase 0 and §8.
+
+## Repo layout
+
+Flat modules at repository root (Kaggle-friendly):
+
+- `quantize.py` — quaternary quant + `QuantizedLinear`
+- `model.py` — linear replace + skips
+- `train.py` — `QAFTTrainer`
+- `eval.py` — perplexity
+- `config.py` — `QAFTConfig`
+- `tests/` — unit tests
+
+## Local checks
 
 ```bash
-pip install pytest
+pip install pytest torch
 pytest tests/ -v
-jupyter notebook notebooks/qaft_demo.ipynb
 ```
 
-## What it does
+## What it does (pipeline)
 
-1. Loads a pre-trained LLM (default: Qwen2.5-0.5B)
-2. Replaces all `nn.Linear` with `QuantizedLinear` using a 4-state quaternary
-   grid `{-1, -c, c, 1}` (c = 0.25 or 0.5)
-3. Fine-tunes using Straight-Through Estimator with gradient clipping
-4. Evaluates perplexity recovery
-
-## Project
-
-- `PLAN.md` — VRAM budgeting & hardware planning
-- `RESEARCH.md` — Mathematical formulation
-- `AGENTS.md` — Agent instructions for OpenCode
-- `COLAB_GUIDE.md` — Running on Google Colab
+1. Load pretrained LLM (start: Qwen3.5-0.8B-Base)
+2. Replace eligible `nn.Linear` with `QuantizedLinear` (quaternary forward)
+3. QAFT with STE + optional \(\lambda\) anneal on FineWeb-Edu CPT sample
+4. Evaluate recovery vs the **original** model (held-out PPL, later downstream)

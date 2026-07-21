@@ -1,48 +1,70 @@
 # TetraFT — AGENTS.md
 
+Instructions for coding agents working in this repository.
+
 ## Project
 
-Quantization-Aware Fine-Tuning (QAFT) for 2-bit quaternary LLMs. See `PLAN.md` (VRAM/hardware planning) and `RESEARCH.md` (mathematical formulation).
+**TetraFT:** Quantization-Aware Fine-Tuning (QAFT) converting pretrained LLMs to **2-bit quaternary** weights \(\{-1,-c,c,1\}\), healing toward **original model quality**.
 
-## Repository Structure
+| Doc | Read for |
+|-----|----------|
+| `RESEARCH.md` | Math & method (must match code) |
+| `PLAN.md` | Models, FineWeb-Edu data, VRAM, Kaggle |
+| `RESEARCH_PLAN.md` | Phases; **start at Phase 0** |
 
-Files are **flat at root** (no package directory) — required by Kaggle Dataset flattening.
+## Current focus
+
+**Phase 0 only until complete:** quant core, selective replace, config alignment, tests.  
+Do not prioritize notebooks, BitNet baselines, full training runs, or dataset uploads unless asked.
+
+## Repository structure
+
+Files are **flat at root** (no package dir) — required for Kaggle Dataset flattening.
 
 | File | Purpose |
-|---|---|
-| `quantize.py` | `QuantizeFunction` (autograd STE) + `QuantizedLinear` (nn.Module) |
-| `model.py` | `replace_linear_layers()` — walks modules, swaps `nn.Linear` → `QuantizedLinear` |
-| `train.py` | `QAFTTrainer` — training loop, checkpointing, AMP, cosine LR |
-| `eval.py` | `evaluate_perplexity()` — no-grad PPL on a DataLoader |
-| `config.py` | `QAFTConfig` dataclass |
-| `notebooks/qaft_demo.ipynb` | Self-contained Colab notebook entrypoint |
+|------|---------|
+| `quantize.py` | Quaternary quant + `QuantizedLinear` (STE, \(\lambda\), scale modes) |
+| `model.py` | `replace_linear_layers()` + skip policy + replace report |
+| `train.py` | `QAFTTrainer` |
+| `eval.py` | `evaluate_perplexity()` |
+| `config.py` | `QAFTConfig` dataclass (defaults = plan defaults) |
 | `tests/` | `test_quantize.py`, `test_model.py` |
+| `notebooks/` | Optional glue only — **not** source of truth |
 
-## Key Design Decisions
+## Locked design decisions
 
-- **Notebook-first interface.** The library modules are flat (.py files at root). Import directly: `from config import QAFTConfig`.
-- **Raw PyTorch training.** No HF `Trainer`. `QAFTTrainer` uses `AdamW` + linear warmup schedule + `GradScaler`.
-- **Quaternary grid** `{-1, -c, c, 1}`, default `c=0.5`. Adjustable per layer via `QuantizedLinear(c=...)`.
-- **STE backward** clips gradients for `|W/γ| > 1.0` (saturated weights frozen).
-- **`lm_head` skipped** by default (`QuantizedLinear` never replaces it). Controlled by `skip_lm_head` flag.
-- **Model loaded in FP32** on CPU, layers replaced, then moved to GPU. Ensures master weights are FP32.
+- **Grid:** `{-1, -c, c, 1}`, default **`c=0.25`**
+- **Scale default:** `absmean_channel` (per `RESEARCH.md`); ablations via config
+- **STE:** identity first; optional clip mode
+- **\(\lambda\) anneal:** supported; trainer may ramp 0→1
+- **Skip:** `lm_head`, embeddings, vision, norms
+- **First model:** `Qwen/Qwen3.5-0.8B-Base` then `Qwen3.5-2B-Base`
+- **Data:** FineWeb-Edu fixed sample (external Kaggle Dataset; not in repo)
+- **Parity target:** original FP model — not BitNet
+- **Quaternary-optimal:** do not clone BitNet schedules/APIs without reason
+- **Raw PyTorch training** — no HF `Trainer`
+- **Imports:** `from config import QAFTConfig` (flat modules)
+
+## Implementation rules
+
+1. Keep `RESEARCH.md` and code consistent; if you change math, update `RESEARCH.md` in the same change.
+2. Single default for `c` and `scale_mode` across `config.py`, `QuantizedLinear`, and `replace_linear_layers`.
+3. Prefer config-driven knobs over hardcoding.
+4. Tests required for quant bins, scale modes, \(\lambda\in\{0,1\}\), and lm_head skip.
+5. Do not add large data files to git.
+6. Do not expand scope past the current phase unless the user asks.
 
 ## Commands
 
 ```bash
-# run tests (root must be on Python path)
-pip install pytest
+# tests (repo root on PYTHONPATH)
+pip install pytest torch --quiet
 pytest tests/ -v
-
-# launch notebook
-jupyter notebook notebooks/qaft_demo.ipynb
 ```
 
-On Colab: upload repo folder to Drive → open notebook → run all.
+## Architecture notes
 
-## Architecture Notes
-
-- `replace_linear_layers()` is recursive and idempotent. Already-replaced `QuantizedLinear` layers are left untouched.
-- Gradient checkpointing enabled via `model.gradient_checkpointing_enable()` inside `QAFTTrainer.__init__`.
-- Checkpoints are plain `torch.save` dicts (step, model/opt/scheduler states, best PPL, config).
-- The 0.5B model fits on T4 (15 GB) with FP32 AdamW at batch_size=2, seq_len=512, grad_accum=4.
+- `replace_linear_layers()` is recursive and idempotent (`QuantizedLinear` left untouched).
+- Gradient checkpointing is enabled in `QAFTTrainer` when configured.
+- Checkpoints: `torch.save` dicts (step, model/opt/scheduler, metrics, config).
+- Kaggle: BF16 + 8-bit Adam + checkpointing for 0.8B; see `PLAN.md`.

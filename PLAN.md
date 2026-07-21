@@ -1,165 +1,176 @@
-Project TetraFT: Resource Planning & Memory Estimator
+# TetraFT — Resources, Data & Platform Plan
 
-Quantization-Aware Fine-Tuning (QAFT) for 2-Bit Quaternary LLMs
+**Platform:** Kaggle (primary). Local/Colab optional for unit tests.  
+**Math/method:** `RESEARCH.md`  
+**Research roadmap:** `RESEARCH_PLAN.md`
 
-In standard post-training quantization (PTQ), we only need enough memory to load the model weights. However, in Quantization-Aware Fine-Tuning (QAFT), we must maintain high-precision continuous latent weights $W$ while simulating the 2-bit quaternary forward pass. This creates a unique memory profile that requires careful planning to optimize iteration speed.
+---
 
-Below is the detailed technical resource blueprint for running your TetraFT research track.
+## 1. Model ladder
 
-1. The Core Equation: QAFT VRAM Breakdown
+| Stage | Checkpoint | Role |
+|-------|------------|------|
+| **Now** | `Qwen/Qwen3.5-0.8B-Base` | All method development + first recovery runs |
+| Next | `Qwen/Qwen3.5-0.8B` (instruct) | Optional after base PPL recovery |
+| Scale-up | `Qwen/Qwen3.5-2B-Base` | Main paper-scale model once 0.8B recipe is stable |
 
-To estimate how much Video RAM (VRAM) you need on your GPU, we must map out where every byte goes. During training, memory is split into four distinct pools:
+**Notes:**
 
-$$M_{\text{total}} = M_{\text{weights}} + M_{\text{gradients}} + M_{\text{optimizer}} + M_{\text{activation}} + M_{\text{overhead}}$$
+- Qwen3.5 dense small models are **hybrid** (Gated DeltaNet + Gated Attention), not MoE.
+- Prefer **Base** for conversion science; language path only; skip vision.
+- One family first (Qwen3.5). Other architectures only after 0.8B→2B works.
 
-Let $P$ be the number of active parameters in your model (in billions).
+---
 
-A. Model Weights ($M_{\text{weights}}$)
+## 2. Dataset plan (Kaggle)
 
-Even though the forward pass uses 2-bit simulated weights, the continuous latent weights $W$ must be updated in high-precision to capture tiny gradient steps.
+### 2.1 Train: FineWeb-Edu **fixed sample** (custom Kaggle Dataset)
 
-Standard FP32 Master Weights: $4$ bytes per parameter.
+| Item | Decision |
+|------|----------|
+| Source | Hugging Face `HuggingFaceFW/fineweb-edu` |
+| In this repo? | **No** — build a fixed sample |
+| Full 1.3T? | **No** |
+| Delivery | Upload a **custom Kaggle Dataset** after one-time sampling |
 
-Alternative BF16 Master Weights: $2$ bytes per parameter (requires highly stable gradients).
+**Recommended sample sizes**
 
-Formula: $M_{\text{weights}} = P \times 4\text{ GB}$ (assuming FP32 master weights for stability).
+| Name | Tokens | Disk (approx.) | Use |
+|------|--------|----------------|-----|
+| smoke | 5–10M | tens of MB | pipeline |
+| ablate | 50M | ~200–400 MB text | recipe search |
+| **main 0.8B** | **100–200M** | **~0.7–1.5 GB** JSONL; less if parquet/gz | primary recovery |
+| stretch | 500M–1B | multi-GB | only if large gap remains |
 
-B. Gradients ($M_{\text{gradients}}$)
+**200M tokens ≈ ~1 GB raw text** (often 0.5–1.5 GB as JSONL/parquet depending on compression).
 
-Gradients are calculated in floating-point precision to prevent underflow.
+**Protocol**
 
-FP32 Gradients: $4$ bytes per parameter.
+1. One-time notebook/script: stream HF FineWeb-Edu → write `train.jsonl` (+ optional `val.jsonl`).
+2. Fix **seed**, document HF revision, max tokens, packing `seq_length`.
+3. Publish as Kaggle Dataset (e.g. `tetraft-fineweb-edu-200m`).
+4. All training notebooks attach that dataset; prefer **internet off** during train.
 
-Formula: $M_{\text{gradients}} = P \times 4\text{ GB}$
+### 2.2 Validation (required)
 
-C. Optimizer States ($M_{\text{optimizer}}$)
+- Held-out FineWeb-Edu docs **or** a fixed WikiText-style val set.
+- **Never** mixed into train.
+- Same val for: original, zero-FT quant, every TetraFT checkpoint.
 
-The choice of optimizer is the biggest lever for controlling VRAM. For LLMs, AdamW is standard. It tracks two states: momentum (mean) and variance (uncentered variance).
+### 2.3 Instruction data
 
-Standard FP32 AdamW: $8$ bytes per parameter ($4\text{ bytes} \times 2\text{ states}$).
+- **Deferred** until PPL is near the original.
+- Not used for Phase 0–1 method work.
 
-8-bit Quantized AdamW (e.g., bitsandbytes): $2$ bytes per parameter ($1\text{ byte} \times 2\text{ states}$).
+### 2.4 What not to use as main heal data
 
-Formula (Standard): $M_{\text{optimizer}} = P \times 8\text{ GB}$
+- Alpaca-only / tiny SFT as the sole recovery set  
+- Full raw CommonCrawl without filtering  
+- Unversioned random Kaggle FineWeb dumps as the paper corpus (OK for smoke only)
 
-Formula (8-bit): $M_{\text{optimizer}} = P \times 2\text{ GB}$
+---
 
-D. Activation Memory ($M_{\text{activation}}$)
+## 3. QAFT VRAM model
 
-During the forward pass, PyTorch must cache the intermediate activations of every single layer so it can calculate gradients during the backward pass. Activation memory scales linearly with sequence length ($L$), batch size ($B$), and architectural width.
+Latent weights stay high precision during training. Forward simulates quaternary \(Q(W)\).
 
-To drastically save activation memory without sacrificing performance, you should use Gradient Checkpointing (activation checkpointing). This trades compute for memory by re-evaluating layers during the backward pass instead of caching them.
+\[
+M_{\mathrm{total}} \approx M_{\mathrm{weights}} + M_{\mathrm{grads}} + M_{\mathrm{optim}} + M_{\mathrm{acts}} + M_{\mathrm{overhead}}
+\]
 
-2. Concrete VRAM Scenarios
+| Pool | FP32-heavy | Lean Kaggle stack |
+|------|------------|-------------------|
+| Weights | 4 B/param | **2 B/param (BF16)** |
+| Grads | 4 B/param | 2–4 B/param |
+| AdamW | 8 B/param | **~2 B/param (8-bit Adam)** |
+| Acts | seq × batch × width | **gradient checkpointing** |
 
-Let's calculate the exact VRAM required for our two main candidate models using Standard FP32 AdamW and Gradient Checkpointing enabled.
+Rough parameter-only floor (ignore acts): \(P_{\mathrm{billions}} \times (4+4+8)\) GB for full FP32 Adam ≈ \(16P\) GB.
 
-Scenario A: Qwen2.5-0.5B (The Sandbox)
+---
 
-Parameter Count ($P$): $\approx 0.49\text{ Billion}$
+## 4. Concrete scenarios
 
-Weights (FP32): $0.49 \times 4 = 1.96\text{ GB}$
+### A. Qwen3.5-0.8B (current target)
 
-Gradients (FP32): $0.49 \times 4 = 1.96\text{ GB}$
+Assume \(P \approx 0.8\,\mathrm{B}\).
 
-Optimizer States (FP32 AdamW): $0.49 \times 8 = 3.92\text{ GB}$
+| Stack | Rough total (w/ checkpointing, seq 512–1024, small microbatch) |
+|-------|------------------------------------------------------------------|
+| FP32 + FP32 Adam | often **≥ 16–20 GB** — tight / OOM on 16 GB |
+| **BF16 + 8-bit Adam + grad ckpt** | **~10–14 GB** — target for Kaggle T4/P100-class |
+| Microbatch | 1–2; accumulate for effective larger batch |
 
-Activation Memory (with gradient checkpointing, batch size 4, 1024 seq length): $\approx 1.5\text{ GB}$
+**Kaggle default recipe (0.8B):** BF16, 8-bit AdamW, gradient checkpointing, `seq_length=512` or `1024`, `batch_size=1–2`, grad accum as needed.
 
-CUDA/PyTorch Overhead: $\approx 1.0\text{ GB}$
+### B. Qwen3.5-2B (later)
 
-Estimated VRAM Required: $\approx 10.34\text{ GB}$
+Assume \(P \approx 2\,\mathrm{B}\).
 
-Optimization Note: Using 8-bit Adam reduces this to $\approx 7.4\text{ GB}$, easily fitting inside a budget 8GB or 12GB GPU.
+| Stack | Rough |
+|-------|--------|
+| FP32 Adam full | **~32 GB+** acts — needs large GPU |
+| BF16 + 8-bit Adam + ckpt | **~18–28 GB** — 24 GB possible if careful; 40 GB comfortable |
 
-Scenario B: Llama-3.2-1B (The Benchmark)
+Do not scale to 2B until 0.8B recovery pipeline is stable.
 
-Parameter Count ($P$): $\approx 1.23\text{ Billion}$
+---
 
-Weights (FP32): $1.23 \times 4 = 4.92\text{ GB}$
+## 5. Kaggle layout
 
-Gradients (FP32): $1.23 \times 4 = 4.92\text{ GB}$
+```
+Kaggle Dataset: tetraft-code     → flat .py modules (this repo)
+Kaggle Dataset: fineweb-edu-Xm  → train (+ val) text sample
+Kaggle Notebook                 → train / eval scripts
+```
 
-Optimizer States (FP32 AdamW): $1.23 \times 8 = 9.84\text{ GB}$
+| Item | Policy |
+|------|--------|
+| Code layout | **Flat root** `.py` (Kaggle flattens packages) |
+| Notebook | Optional glue only; **logic lives in modules** |
+| Internet | On for one-time data build / model download; off for reproducible train if cached |
+| Checkpoints | `/kaggle/working` → Dataset or drive export |
 
-Activation Memory (with gradient checkpointing, batch size 4, 1024 seq length): $\approx 2.5\text{ GB}$
+**Dependencies (typical):** `torch`, `transformers`, `datasets`, `accelerate`, `bitsandbytes`, `pytest` (local).
 
-CUDA/PyTorch Overhead: $\approx 1.5\text{ GB}$
+---
 
-Estimated VRAM Required: $\approx 23.68\text{ GB}$
+## 6. Token budgets (0.8B)
 
-Optimization Note: Using 8-bit Adam reduces this to $\approx 16.3\text{ GB}$, fitting safely within a standard 24GB consumer GPU (like an RTX 3090 or 4090).
+| Run | Tokens | Purpose |
+|-----|--------|---------|
+| Smoke | 1–5M | NaN/OOM/shock→movement |
+| Ablations | ~50M each | \(c\), scale, \(\lambda\), scope |
+| Main | 100–200M | Recovery vs original |
+| Optional | 500M+ | Close residual gap |
 
-3. Hardware Recommendation Guide
+---
 
-Based on the calculations above, here is how you should allocate your physical or cloud budget:
+## 7. Software stack
 
-Tier
+| Component | Choice |
+|-----------|--------|
+| Training | Raw PyTorch `QAFTTrainer` (no HF Trainer) |
+| Models | Hugging Face `transformers` |
+| Optimizer | AdamW; **bitsandbytes 8-bit Adam** on Kaggle |
+| Precision | BF16 compute; quant math in FP32 |
+| Logging | CSV / stdout first; W&B optional |
+| Eval v1 | Held-out PPL vs original |
+| Eval later | lm-eval-harness |
 
-Hardware Setup
+---
 
-Target Model
+## 8. Efficiency claims (later)
 
-Running Cost
+- Disk: pack 2-bit indices + scales + FP leftovers (embed/lm_head).  
+- Training still uses latent high-precision weights (state clearly in paper).  
+- Custom quaternary kernels: **not required** for capability results.
 
-Strategy
+---
 
-Local (Low Cost)
+## 9. First resource actions (with Phase 0)
 
-1x RTX 3060 / 4060 (12GB VRAM)
-
-Qwen2.5-0.5B
-
-Free (Upfront cost)
-
-Perfect for initial implementation of the custom quantization layers, verifying the custom autograd engine, and fast feedback loops.
-
-Local (Standard)
-
-1x RTX 3090 / 4090 / 5090 (24GB - 32GB VRAM)
-
-Llama-3.2-1B
-
-Free (Upfront cost)
-
-The gold standard for independent researchers. Allows you to run full QAFT runs overnight without cloud bill anxiety.
-
-Cloud (Pay-as-you-go)
-
-Google Colab Pro or RunPod (1x A100 40GB/80GB)
-
-Llama-3.2-1B
-
-$\$0.50$ - $\$1.50$ / hour
-
-Best for high-throughput scaling experiments, running evaluations (MMLU, GSM8k), and training on larger token batches.
-
-4. Software Stack Requirements
-
-You will not need heavy enterprise-level framework engineering to start. Stick to a clean, highly debuggable stack:
-
-PyTorch (latest stable): Essential for writing your custom torch.autograd.Function to handle the Straight-Through Estimator (STE) backward pass.
-
-Hugging Face transformers & accelerate: For handling model loading, pipeline execution, and model weight manipulation.
-
-bitsandbytes: Crucial if you want to swap to 8-bit optimizers to save VRAM on tighter hardware setups.
-
-deepspeed or FSDP (Optional for Phase 2): Only needed if you decide to scale to multi-GPU training. For single-GPU runs on 0.5B or 1B models, vanilla PyTorch is cleaner and much easier to debug.
-
-5. Dataset & Pre-training Knowledge Baseline
-
-Because TetraFT is a Fine-Tuning track, you do not need to pre-train a model from scratch. You are doing Quantization-Aware Continual Pre-training or Instruction Tuning to help the model heal the quantization noise.
-
-Recommended Datasets:
-
-For General Knowledge Retention (Continual Pre-training):
-
-SlimPajama-6B (or a subset of C4): Use a clean, randomized subset (e.g., 50M to 100M tokens). This is enough to evaluate how well the model recovers its language modeling ability (perplexity) post-quantization.
-
-For Instruction Fine-Tuning (SFT):
-
-Alpaca-GPT4 or UltraFeedback (clean): This allows you to evaluate if the model can retain reasoning, instruction-following, and formatting abilities under 2-bit quantization constraint.
-
-Token Budget:
-
-For a 0.5B or 1B model, you will generally observe convergence of the quantization recovery within 50 million to 200 million tokens (which takes roughly 1 to 4 hours on a single modern GPU).
+1. Confirm Kaggle GPU quota / T4 or better.  
+2. After quant core works: download `Qwen3.5-0.8B-Base` once, cache.  
+3. Build **50M** FineWeb-Edu sample first (faster iterate); expand to **200M** for main runs.  
+4. Keep val split fixed from day one of data builds.
