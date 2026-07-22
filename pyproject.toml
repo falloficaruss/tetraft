@@ -6,3 +6,8 @@ requires-python = ">=3.10"
 
 [project.optional-dependencies]
 dev = ["pytest"]
+
+# Flat modules live at repo root (Kaggle-friendly). Put root on sys.path for tests.
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

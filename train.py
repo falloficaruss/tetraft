@@ -58,11 +58,13 @@ class QAFTTrainer:
 
                 batch = {k: v.to(self.device) for k, v in batch.items()}
 
-                if self.config.quant_warmup:
-                    lambda_val = min(4.0 * self.global_step / self.config.max_steps, 1.0)
-                    for module in self.model.modules():
-                        if isinstance(module, QuantizedLinear):
-                            module.lambda_ = lambda_val
+                if self.config.quant_warmup_steps > 0:
+                    lambda_val = min(1.0, self.global_step / self.config.quant_warmup_steps)
+                else:
+                    lambda_val = 1.0
+                for module in self.model.modules():
+                    if isinstance(module, QuantizedLinear):
+                        module.lambda_ = lambda_val
 
                 outputs = self.model(**batch)
                 loss = outputs.loss
@@ -87,7 +89,11 @@ class QAFTTrainer:
                     self.metrics["step"].append(self.global_step)
                     self.metrics["loss"].append(avg_loss)
                     self.metrics["lr"].append(lr)
-                    logger.info(f"Step {self.global_step}: loss={avg_loss:.4f}, lr={lr:.2e}")
+                    self.metrics.setdefault("lambda", []).append(lambda_val)
+                    logger.info(
+                        f"Step {self.global_step}: loss={avg_loss:.4f}, "
+                        f"lr={lr:.2e}, lambda={lambda_val:.4f}"
+                    )
                     self.total_loss = 0.0
 
                 if eval_dataloader is not None and self.global_step % self.config.eval_steps == 0:

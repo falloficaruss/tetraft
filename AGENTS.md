@@ -14,8 +14,19 @@ Instructions for coding agents working in this repository.
 
 ## Current focus
 
-**Phase 0 only until complete:** quant core, selective replace, config alignment, tests.  
-Do not prioritize notebooks, BitNet baselines, full training runs, or dataset uploads unless asked.
+**Phase 0 complete.** Next: **Phase 1** — FineWeb-Edu sample + Qwen3.5-0.8B-Base smoke on Kaggle.  
+Do not prioritize BitNet baselines, full 2B runs, or notebook rewrites unless asked.
+
+## Entry pattern
+
+```python
+from config import QAFTConfig
+from model import replace_from_config
+
+config = QAFTConfig()
+# model = AutoModelForCausalLM.from_pretrained(config.model_name, ...)
+replace_from_config(model, config)
+```
 
 ## Repository structure
 

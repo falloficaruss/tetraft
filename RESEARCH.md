@@ -171,13 +171,15 @@ Parity metrics:
 
 ---
 
-## 8. Known code debt (must fix in Phase 0)
+## 8. Code status (Phase 0 complete)
 
-| Spec (this file) | Current code (as of plan freeze) |
-|------------------|----------------------------------|
-| Default absmean channel | `absmax` tensor |
-| Default \(c=0.25\) everywhere | split 0.25 / 0.5 defaults |
-| Optional STE clip | identity STE only via detach |
-| Selective module policy | mostly blind Linear replace + lm_head skip |
+All Phase-0 code debt resolved (see `RESEARCH_PLAN.md`):
 
-Phase 0 resolves this table. See `RESEARCH_PLAN.md`.
+| Spec (this file) | Code status |
+|------------------|-------------|
+| Default `absmean_channel` | ✅ `compute_scale()` dispatches 4 modes; default `absmean_channel` |
+| Default `c=0.25` everywhere | ✅ Unified default `c=0.25` in `config.py`, `quantize.py`, `model.py` |
+| STE `identity` + optional `clip` | ✅ `ste_mode` flag in `QuantizedLinear.__init__`; both modes implemented |
+| Selective module policy | ✅ Vision/MTP skip patterns, replace report with `%` quantized |
+| `config.py` model target | ✅ Default `Qwen/Qwen3.5-0.8B-Base` with `scale_mode`, `ste_mode`, `quant_warmup_steps` |
+| λ anneal | ✅ Config-driven `quant_warmup_steps`; formula `min(1, step/warmup)` matches §3.1 |

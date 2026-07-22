@@ -59,25 +59,23 @@
 
 ## 3. Phased execution
 
-### Phase 0 — Make the method real  ✅ **START HERE**
+### Phase 0 — Make the method real  ✅ **COMPLETE**
 
 **Goal:** Code matches `RESEARCH.md`; tests pass; ready for 0.8B smoke.
 
-| # | Task | Done when |
-|---|------|-----------|
-| 0.1 | Rewrite `quantize.py`: `scale_mode`, channel/tensor scales, unified `c`, \(\lambda\), `ste_mode` | Unit tests for bins + STE |
-| 0.2 | Harden `model.py`: exclude patterns, replace report, default `c` from config | lm_head/vision safe; inventory print |
-| 0.3 | Align `config.py` defaults with this plan (0.8B model, \(c=0.25\), absmean_channel) | Single source of truth |
-| 0.4 | Expand `tests/` | `pytest tests/ -v` green |
-| 0.5 | Minimal train/eval path works offline on CPU toy or tiny tensors | No notebook dependency |
+| # | Task | Status |
+|---|------|--------|
+| 0.1 | Rewrite `quantize.py`: `scale_mode`, channel/tensor scales, unified `c`, \(\lambda\), `ste_mode` | ✅ |
+| 0.2 | Harden `model.py`: exclude patterns, replace report, `replace_from_config` | ✅ |
+| 0.3 | Align `config.py` defaults (0.8B-Base, \(c=0.25\), absmean_channel) | ✅ |
+| 0.4 | Expand `tests/` | ✅ |
+| 0.5 | Clip STE forward fix; λ logging in trainer | ✅ |
 
 **Out of scope for Phase 0:** FineWeb download, full 0.8B train, downstream eval, packing kernels, distillation.
 
-**Next after Phase 0:** Phase 1 (data + 0.8B smoke on Kaggle).
-
 ---
 
-### Phase 1 — Data + 0.8B smoke (Kaggle)
+### Phase 1 — Data + 0.8B smoke (Kaggle)  ← **START HERE**
 
 | # | Task |
 |---|------|
@@ -193,14 +191,9 @@ Optional: CE + KL(original) if CE alone stalls.
 
 ## 8. Immediate next step
 
-### → Implement **Phase 0** in code
+### → **Phase 1** on Kaggle
 
-Order of work:
-
-1. `quantize.py` (absmean channel, \(c\), \(\lambda\), ste modes)  
-2. `model.py` (skips + report)  
-3. `config.py` (defaults: 0.8B-Base, \(c=0.25\), `scale_mode=absmean_channel`)  
-4. `tests/` update  
-5. Smoke import path on CPU  
-
-When Phase 0 is done, proceed to Phase 1 on Kaggle (data sample + 0.8B smoke).
+1. Build FineWeb-Edu fixed sample (start 50M + held-out val) → Kaggle Dataset  
+2. Load `Qwen/Qwen3.5-0.8B-Base`, `replace_from_config`, dump Linear inventory  
+3. Original val PPL → zero-FT quant shock PPL → 1–5M token QAFT smoke  
+4. Memory recipe: BF16 + 8-bit Adam + gradient checkpointing

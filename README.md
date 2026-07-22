@@ -23,8 +23,16 @@ Convert a pretrained model to weights on \(\{-1,-c,c,1\}\), then heal so perform
 
 ## Current step
 
-**Phase 0** — align quantizer / replace / config / tests with `RESEARCH.md`.  
-See `RESEARCH_PLAN.md` §3 Phase 0 and §8.
+**Phase 0 complete.** Next: **Phase 1** — FineWeb-Edu sample + 0.8B smoke on Kaggle.  
+See `RESEARCH_PLAN.md` §3 Phase 1 and §8.
+
+```python
+from config import QAFTConfig
+from model import replace_from_config
+
+config = QAFTConfig()
+replace_from_config(model, config)
+```
 
 ## Repo layout
 
