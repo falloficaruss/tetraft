@@ -10,13 +10,16 @@ Instructions for coding agents working in this repository.
 |-----|----------|
 | `RESEARCH.md` | Math & method (must match code) |
 | `PLAN.md` | Models, FineWeb-Edu data, VRAM, Kaggle |
-| `RESEARCH_PLAN.md` | Phases; **Phase 1c next** (`scale_25m`) |
+| `RESULTS.md` | **Frozen Kaggle PPL baselines + architectural next steps** |
+| `RESEARCH_PLAN.md` | Phases; **Phase 2 next** |
+| `KAGGLE.md` | Kaggle ops / disk lesson |
 
 ## Current focus
 
-**Phase 1 + 1b complete.** **Next: Phase 1c** — `--preset scale_25m` (~25M tok, cosine LR + 0.1 floor).  
-Baselines: orig ~17.7, shock ≫1e6, 5.2M → ~79.4. Then Phase 2 ablations. See `KAGGLE.md`.  
-Do not prioritize BitNet baselines, full 2B runs, or notebook rewrites unless asked.
+**Phase 1+1b done; 1c partial (recorded).** Read **`RESULTS.md`** before changing train recipe.  
+Baselines: orig ~17.7; full_smoke 5.2M→~79; scale_25m ~21M→~69 (less efficient early).  
+**Next (architecture):** disk-safe ckpts → Phase 2 ablations (scope/GDN, \(c\), scale) with **full_smoke DNA** (λw≈256).  
+Do not prioritize BitNet, blind scale_50m, 2B, or notebook rewrites unless asked.
 
 ## Entry pattern
 

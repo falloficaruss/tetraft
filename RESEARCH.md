@@ -183,3 +183,9 @@ All Phase-0 code debt resolved (see `RESEARCH_PLAN.md`):
 | Selective module policy | ✅ Vision/MTP skip patterns, replace report with `%` quantized |
 | `config.py` model target | ✅ Default `Qwen/Qwen3.5-0.8B-Base` with `scale_mode`, `ste_mode`, `quant_warmup_steps` |
 | λ anneal | ✅ Config-driven `quant_warmup_steps`; formula `min(1, step/warmup)` matches §3.1 |
+
+---
+
+## 9. Empirical baselines
+
+Kaggle PPL numbers, schedule lessons, and **architectural next steps** live in **`RESULTS.md`** (not duplicated here). Keep this file as math/method law; update `RESULTS.md` when runs finish.

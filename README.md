@@ -9,8 +9,10 @@ Convert a pretrained model to weights on \(\{-1,-c,c,1\}\), then heal so perform
 | File | Contents |
 |------|----------|
 | [`RESEARCH.md`](RESEARCH.md) | Mathematical formulation & method (code must match) |
+| [`RESULTS.md`](RESULTS.md) | **Kaggle baselines + what to do next architecturally** |
 | [`PLAN.md`](PLAN.md) | Models, FineWeb-Edu data, VRAM, Kaggle |
-| [`RESEARCH_PLAN.md`](RESEARCH_PLAN.md) | Phases, experiments, paper plan — **start at Phase 0** |
+| [`RESEARCH_PLAN.md`](RESEARCH_PLAN.md) | Phases, experiments, paper plan |
+| [`KAGGLE.md`](KAGGLE.md) | Kaggle checklist / disk lesson |
 | [`AGENTS.md`](AGENTS.md) | Conventions for coding agents |
 
 ## Locked defaults
@@ -23,9 +25,15 @@ Convert a pretrained model to weights on \(\{-1,-c,c,1\}\), then heal so perform
 
 ## Current step
 
-**Phase 1 + 1b complete.** **Next: Phase 1c** `--preset scale_25m` (~25M tok).  
-Baselines (Kaggle): orig ~17.7 → shock ≫1e6 → 5.2M PPL ~79.4.  
-See `RESEARCH_PLAN.md` §3 and **[`KAGGLE.md`](KAGGLE.md)**.
+Phase 1+1b complete; 1c partial. **Read [`RESULTS.md`](RESULTS.md).**  
+
+| Milestone | Val PPL |
+|-----------|--------:|
+| Original | ~17.7 |
+| full_smoke ~5.2M | ~79 |
+| scale_25m ~21M (disk stop) | ~69 |
+
+**Next:** disk-safe training + Phase 2 recipe search (control = full_smoke DNA). Not blind scale_50m.
 
 ```python
 from config import QAFTConfig
@@ -33,19 +41,6 @@ from model import replace_from_config
 
 config = QAFTConfig()
 replace_from_config(model, config)
-```
-
-### Kaggle
-
-```bash
-# Phase 1c scale-up (cosine LR, min_lr_ratio=0.1)
-python run_smoke.py --preset scale_25m \
-  --train-data /kaggle/input/.../train.jsonl \
-  --val-data /kaggle/input/.../val.jsonl \
-  --output-dir /kaggle/working/checkpoints
-
-# Presets: short | longer | full_smoke | scale_25m | scale_50m
-# tokens/step = batch × seq × accum (default 1×512×8 = 4096)
 ```
 
 ## Repo layout

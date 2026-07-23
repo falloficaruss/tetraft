@@ -1,5 +1,7 @@
 # TetraFT — Kaggle checklist
 
+**Empirical baselines & next architecture:** [`RESULTS.md`](RESULTS.md) (source of truth for numbers).
+
 ## Datasets
 
 | Kaggle Dataset | Contents |
@@ -17,58 +19,56 @@ CPU, Internet ON → `notebooks/build_fineweb_sample.ipynb` → Dataset `tetraft
 
 ---
 
-## B. Phase 1 / 1b smokes ✅
+## B. Recorded runs (do not re-litigate)
 
-| Run | Tokens | Val PPL (end, λ=1) |
-|-----|--------|-------------------:|
-| Original | — | **~17.67** |
-| Shock (0 FT) | 0 | **≫ 1e6** |
-| `short` | ~0.82M | ~472 |
-| `full_smoke` | **~5.24M** | **~79.4** (gap ≈ 4.5× orig) |
+| Run | ≈ tokens | Val PPL | Notes |
+|-----|---------:|--------:|-------|
+| Original | — | **~17.67** | FP baseline |
+| Shock | 0 | ≫1e6 | λ=1, zero FT |
+| `short` | ~0.8M | ~472 | pipeline |
+| **`full_smoke`** | **5.2M** | **~79.4** | **best sample efficiency** (λw=256, linear→0) |
+| `scale_25m` (partial) | ~21M | **~68.6** | λw=512 + cosine; **disk stop**; worse early efficiency |
 
-Stack: BF16 + AdamW8bit + grad ckpt, seq 512, batch 1, accum 8.
+Stack: BF16 + AdamW8bit + grad ckpt, seq 512, batch 1, accum 8 → **4096 tok/step**.
 
 If `KeyError: qwen3_5`:  
 `%pip install -U "git+https://github.com/huggingface/transformers.git"`
 
 ---
 
-## C. Phase 1c — scale-up (NEXT)
+## C. Disk lesson (blocking for long jobs)
 
-Same recipe (`c=0.25`, `absmean_channel`, identity STE). **Cosine LR** with **min_lr_ratio=0.1** (no die-to-zero).
+`scale_25m` filled Kaggle working disk via repeated **full model + optimizer** checkpoints.
 
-Token math: `1 × 512 × 8 = 4096` tokens/micro-step.
+**Before the next long run, implement/use:**
+- Weights-only `best` / `final` (no Adam state unless resume is required)
+- No frequent `step_*` dumps (or hard prune + limit)
+- Clear `/kaggle/working/checkpoints` before start
 
-| Preset | Steps | ≈ tokens | λ warmup | LR warmup | Wall (rough) |
-|--------|------:|---------:|---------:|----------:|--------------|
-| **`scale_25m`** | 6104 | **~25.0M** | 512 | 256 | ~4–5× full_smoke (~3–4 h if full_smoke ~50 min) |
-| `scale_50m` | 12207 | ~50.0M | 1024 | 512 | ~2× scale_25m |
+Until then, prefer **short scouts (~5–10M)** only.
+
+---
+
+## D. What to run next (architecture — see RESULTS.md §5)
+
+**Not recommended as default:** re-run `scale_25m` / `scale_50m` with the same knobs.
+
+**Recommended direction:**
+1. **Control DNA** = full_smoke (λ_warmup≈**256**, peak lr 2e-4, same quant defaults)
+2. **Phase 2 scouts** @ ~5–10M, one factor at a time:
+   - module scope (exclude GDN / linear-attn)
+   - \(c\) ∈ {0.25, 0.5}
+   - scale_mode
+3. **Long-run LR** as a separate decision: mid-run LR + late anneal/floor — don’t assume full-horizon linear→0 scales
+4. Optional later: full_smoke knobs × 25M as a pure length test (not bundled with λw=512)
 
 ```bash
-python run_smoke.py --preset scale_25m \
+# Example once disk-safe + presets exist — control-style smoke still valid:
+python run_smoke.py --preset full_smoke \
   --train-data /kaggle/input/.../train.jsonl \
   --val-data /kaggle/input/.../val.jsonl \
   --output-dir /kaggle/working/checkpoints
 ```
-
-Notebook: `PRESET = "scale_25m"` in `notebooks/run_smoke.ipynb`.
-
-**Watch**
-- `ppl_after_smoke` vs **79.4**
-- `train_metrics.perplexity` after λ=1 (step ≥ 512)
-- end LR ≈ `0.1 * 2e-4` (not 0)
-- `after/orig` (target → 1.0)
-
-**Success (1c):** PPL **&lt; 79**, finite loss.  
-**Gate → Phase 2:** still falling at 25M → optional `scale_50m` **or** start ablations; plateau ≫ 17.7 → ablations sooner.
-
----
-
-## D. Phase 2 — recipe search (after 1c)
-
-Fixed data order; one factor at a time vs control (= 1c recipe).  
-Scout ~10M tok; confirm winners longer. Factors: `c`, scale, λ schedule, STE, module scope (GDN).  
-Harness TBD after `scale_25m` results.
 
 ---
 
@@ -85,8 +85,7 @@ Harness TBD after `scale_25m` results.
 
 | Phase | Status |
 |-------|--------|
-| 1 short smoke + data + memory | **COMPLETE** |
-| 1b 1–5M smoke | **COMPLETE** (5.2M → PPL ~79) |
-| **1c scale_25m** | **NEXT** |
-| 2 ablations | after 1c |
+| 1 + 1b smoke | **COMPLETE** (5.2M → ~79) |
+| 1c scale_25m | **PARTIAL** (~21M → ~69); recorded in RESULTS.md |
+| **Next** | Eng (disk) + **Phase 2** recipe/schedule architecture |
 | 3 main 100–200M | after recipe freeze |

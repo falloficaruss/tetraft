@@ -7,8 +7,10 @@
 | Doc | Role |
 |-----|------|
 | `RESEARCH.md` | Math + method (implementation must match) |
+| `RESULTS.md` | **Frozen Kaggle baselines + architectural next steps** |
 | `PLAN.md` | Models, data, VRAM, Kaggle |
 | `RESEARCH_PLAN.md` | This file — phases, experiments, paper |
+| `KAGGLE.md` | Kaggle ops |
 | `AGENTS.md` | Coding agent conventions |
 
 ---
@@ -97,41 +99,38 @@
 | 1b.1–1b.2 | `full_smoke` ~5.24M tok | ✅ end PPL **~79.4** (after/orig ≈ 4.5) |
 | 1b.3 | PPL vs steps after λ=1 | ✅ 388 → 160 → 133 → 100 → 90 → **79** |
 
-Curve after λ=1 still falling at stop; linear LR hit 0 (fixed in 1c).
+**Most sample-efficient controlled run so far.** Schedule DNA: λ_warmup=**256**, lr_warmup=128, linear→0, lr=2e-4.
 
-### Phase 1c — Scale-up same recipe  ← **NEXT**
+### Phase 1c — Longer scale-up  ✅ **PARTIAL (recorded)**
 
-Same quant defaults; **cosine LR + `min_lr_ratio=0.1`**.
+| Run | Result |
+|-----|--------|
+| `scale_25m` (λw=512, cosine+0.1 floor) | Interrupted ~21M tok (disk) → PPL **~68.6** (after/orig ≈ 3.9) |
+| Efficiency vs full_smoke | Worse early: ~79 only around **~17M** tok, not 5M |
 
-| # | Task |
-|---|------|
-| 1c.1 | `--preset scale_25m` (~25.0M tok) |
-| 1c.2 | Optional `--preset scale_50m` if still steep |
-| 1c.3 | Gate: PPL &lt; 79 → then Phase 2 ablations |
-
-```bash
-python run_smoke.py --preset scale_25m --train-data .../train.jsonl --val-data .../val.jsonl \
-  --output-dir /kaggle/working/checkpoints
-```
-
-Details: **`KAGGLE.md`**.
+**Do not** treat `scale_25m` knobs as the default control.  
+Full numbers, curves, and lessons: **`RESULTS.md`**.
 
 ---
 
-### Phase 2 — 0.8B recipe search  (after 1c)
+### Phase 2 — Recipe + schedule architecture  ← **NEXT**
 
-Fixed data order; optimize **gap to original**. Control = 1c recipe.
+Fixed data order; optimize **gap to original**.  
+**Control DNA:** full_smoke quant + **λ_warmup≈256** (not scale_25m’s λw=512).  
+Scout budget ~**5–10M** tokens per factor; disk-safe checkpoints required before long jobs.
 
-| Factor | Levels |
-|--------|--------|
-| \(c\) | 0.25, 0.5 |
-| scale | absmean_channel, absmean_tensor, absmax_* |
-| \(\lambda\) | hard / linear / delayed |
-| ste | identity / clip |
-| scope | all eligible Linear / FFN-heavy / exclude GDN |
-| tokens | scout ~10M; confirm 20–50M; main 100–200M for best |
+| Priority | Factor | Levels / notes |
+|----------|--------|----------------|
+| P0 | **scope** | all eligible Linear vs **exclude GDN / linear-attn** |
+| P0 | **\(c\)** | 0.25, 0.5 |
+| P0 | **scale** | absmean_channel, absmean_tensor, absmax_* |
+| P1 | λ / STE / LR shape | hard vs linear λ; identity vs clip; long-run LR ≠ blind linear→0 over full horizon |
+| P2 | KL to original | if CE stalls |
+| tokens | scout ~5–10M; confirm longer; main 100–200M after freeze |
 
-Optional: CE + KL(original) if CE alone stalls. Harness after `scale_25m` results.
+Optional later: full_smoke knobs × 25M as a **single** length ablation (not bundled with λw=512).
+
+Details: **`RESULTS.md`** §5.
 
 ---
 
@@ -219,11 +218,12 @@ Optional: CE + KL(original) if CE alone stalls. Harness after `scale_25m` result
 
 ## 8. Immediate next step
 
-### → **Phase 1c** scale-up on Kaggle
+### → **Phase 2 architecture** (see `RESULTS.md`)
 
-1. Re-upload **`tetraft-code`** (cosine scheduler + `scale_25m`)  
-2. `python run_smoke.py --preset scale_25m` (notebook `PRESET = "scale_25m"`)  
-3. Compare end PPL vs **79.4**; confirm LR floor ≠ 0  
-4. Then Phase 2 ablations (or optional `scale_50m` if still falling fast)  
+1. Read **`RESULTS.md`** — frozen PPL baselines and lessons  
+2. Before long Kaggle runs: **disk-safe checkpoints** (weights-only best/final)  
+3. Control = **full_smoke DNA** (λ_warmup≈256); scout ablations @ ~5–10M: **scope (GDN), \(c\), scale**  
+4. Long-run LR: do not assume full-horizon linear→0; anneal/floor as explicit factor  
+5. Deprioritize blind `scale_25m`/`scale_50m` reruns and BitNet baselines  
 
-Details: `KAGGLE.md`.
+Details: `RESULTS.md` §5, `KAGGLE.md`.
