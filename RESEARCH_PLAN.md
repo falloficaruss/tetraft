@@ -75,18 +75,35 @@
 
 ---
 
-### Phase 1 — Data + 0.8B smoke (Kaggle)  ← **START HERE**
+### Phase 1 — Data + 0.8B smoke (Kaggle)  ✅ **COMPLETE**
+
+| # | Task | Status |
+|---|------|--------|
+| 1.1 | Build FineWeb-Edu sample (start **50M**, val held-out); upload Kaggle Dataset | ✅ |
+| 1.2 | Load `Qwen3.5-0.8B-Base`, language-only policy, dump Linear inventory | ✅ |
+| 1.3 | Measure **original** val PPL | ✅ ~**17.7** |
+| 1.4 | Hard quant \(\lambda=1\), **zero FT** → shock PPL | ✅ ≫ **1e6** (broken; not calibrated) |
+| 1.5 | Short QAFT smoke: loss finite, recovery vs shock | ✅ ~200 steps / ~0.8M tok → eval PPL ~**472** |
+| 1.6 | Memory recipe: BF16 + 8-bit Adam + grad checkpointing | ✅ |
+
+**Exit:** Stable train/eval loop; shock and partial recovery observed. **Met.**
+
+**Kaggle short-smoke baseline (record):** orig ≈ 17.7 → shock ≫ 1e6 → after ~0.8M tok ≈ 472; loss finite; 66% params quantized (lm_head skipped).
+
+### Phase 1b — Longer smoke (1–5M tokens)  ← **NEXT**
 
 | # | Task |
 |---|------|
-| 1.1 | Build FineWeb-Edu sample (start **50M**, val held-out); upload Kaggle Dataset |
-| 1.2 | Load `Qwen3.5-0.8B-Base`, language-only policy, dump Linear inventory |
-| 1.3 | Measure **original** val PPL |
-| 1.4 | Hard quant \(\lambda=1\), **zero FT** → shock PPL |
-| 1.5 | QAFT **1–5M tokens** smoke: loss finite, some recovery movement |
-| 1.6 | Memory recipe: BF16 + 8-bit Adam + grad checkpointing |
+| 1b.1 | Run `--preset longer` (~2.6M tok) on same data/model |
+| 1b.2 | Optional `--preset full_smoke` (~5.2M tok) |
+| 1b.3 | Log PPL vs steps/tokens after λ=1; confirm trend below ~472 |
 
-**Exit:** Stable train/eval loop; shock and partial recovery observed.
+Presets in `config.SMOKE_PRESETS` / `run_smoke.py --preset`. Details: **`KAGGLE.md`**.
+
+```bash
+python run_smoke.py --preset longer --train-data .../train.jsonl --val-data .../val.jsonl \
+  --output-dir /kaggle/working/checkpoints
+```
 
 ---
 
@@ -191,9 +208,11 @@ Optional: CE + KL(original) if CE alone stalls.
 
 ## 8. Immediate next step
 
-### → **Phase 1** on Kaggle
+### → **Phase 1b** longer smoke on Kaggle
 
-1. Build FineWeb-Edu fixed sample (start 50M + held-out val) → Kaggle Dataset  
-2. Load `Qwen/Qwen3.5-0.8B-Base`, `replace_from_config`, dump Linear inventory  
-3. Original val PPL → zero-FT quant shock PPL → 1–5M token QAFT smoke  
-4. Memory recipe: BF16 + 8-bit Adam + gradient checkpointing
+1. Re-upload **`tetraft-code`** if needed (presets in `config.py` / `run_smoke.py`)  
+2. `python run_smoke.py --preset longer` (or notebook `PRESET = "longer"`)  
+3. Compare `ppl_after_smoke` and curve vs short baseline (~472); gap still vs orig ~17.7  
+4. Then Phase 2 recipe search on fixed 50M data  
+
+Details: `KAGGLE.md`.

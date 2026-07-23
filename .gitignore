@@ -1,2 +1,8 @@
 __pycache__/
 tests/__pycache__/
+.pytest_cache/
+checkpoints/
+data/
+*.jsonl
+smoke_results.json
+linear_inventory.json

@@ -10,11 +10,12 @@ Instructions for coding agents working in this repository.
 |-----|----------|
 | `RESEARCH.md` | Math & method (must match code) |
 | `PLAN.md` | Models, FineWeb-Edu data, VRAM, Kaggle |
-| `RESEARCH_PLAN.md` | Phases; **start at Phase 0** |
+| `RESEARCH_PLAN.md` | Phases; **Phase 1b next** |
 
 ## Current focus
 
-**Phase 0 complete.** Next: **Phase 1** — FineWeb-Edu sample + Qwen3.5-0.8B-Base smoke on Kaggle.  
+**Phase 1 complete** (short smoke on Kaggle). **Next: Phase 1b** — `--preset longer` / `full_smoke` (1–5M tokens).  
+Baseline: orig PPL ~17.7, shock ≫1e6, ~0.8M tok → ~472. See `KAGGLE.md`.  
 Do not prioritize BitNet baselines, full 2B runs, or notebook rewrites unless asked.
 
 ## Entry pattern
@@ -35,11 +36,13 @@ Files are **flat at root** (no package dir) — required for Kaggle Dataset flat
 | File | Purpose |
 |------|---------|
 | `quantize.py` | Quaternary quant + `QuantizedLinear` (STE, \(\lambda\), scale modes) |
-| `model.py` | `replace_linear_layers()` + skip policy + replace report |
-| `train.py` | `QAFTTrainer` |
+| `model.py` | `replace_linear_layers()` + skip policy + inventory |
+| `train.py` | `QAFTTrainer` (BF16, 8-bit Adam, \(\lambda\) anneal) |
 | `eval.py` | `evaluate_perplexity()` |
 | `config.py` | `QAFTConfig` dataclass (defaults = plan defaults) |
-| `tests/` | `test_quantize.py`, `test_model.py` |
+| `data.py` | FineWeb-Edu sample builder + packed JSONL dataloaders |
+| `run_smoke.py` | Phase 1 smoke: inventory → orig/shock PPL → short QAFT |
+| `tests/` | unit tests |
 | `notebooks/` | Optional glue only — **not** source of truth |
 
 ## Locked design decisions

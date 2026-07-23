@@ -6,7 +6,12 @@ import torch.nn as nn
 import pytest
 
 from quantize import QuantizedLinear
-from model import replace_linear_layers, replace_from_config
+from model import (
+    dump_linear_inventory,
+    replace_linear_layers,
+    replace_from_config,
+    set_quant_lambda,
+)
 from config import QAFTConfig
 
 
@@ -205,3 +210,22 @@ class TestReplaceLinearLayers:
             assert layer.q_proj.ste_mode == "clip"
         assert isinstance(model.lm_head, nn.Linear)
         assert not isinstance(model.lm_head, QuantizedLinear)
+
+    # ----- Linear inventory / lambda helper -----
+
+    def test_dump_linear_inventory(self):
+        model = _DummyModel(d=32)
+        inv = dump_linear_inventory(model)
+        assert inv["summary"]["n_eligible"] > 0
+        assert inv["summary"]["n_skipped"] >= 1  # lm_head
+        names = {r["name"] for r in inv["modules"]}
+        assert "lm_head" in names
+
+    def test_set_quant_lambda_updates_all(self):
+        model = _DummyModel(d=32)
+        replace_linear_layers(model, c=0.25, verbose=False)
+        n = set_quant_lambda(model, 0.5)
+        assert n > 0
+        for m in model.modules():
+            if isinstance(m, QuantizedLinear):
+                assert m.lambda_ == 0.5

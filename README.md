@@ -23,8 +23,9 @@ Convert a pretrained model to weights on \(\{-1,-c,c,1\}\), then heal so perform
 
 ## Current step
 
-**Phase 0 complete.** Next: **Phase 1** — FineWeb-Edu sample + 0.8B smoke on Kaggle.  
-See `RESEARCH_PLAN.md` §3 Phase 1 and §8.
+**Phase 1 complete.** **Next: Phase 1b** longer smoke (`--preset longer` ≈ 2.6M tokens).  
+Short-smoke baseline (Kaggle): orig PPL ~17.7 → shock ≫1e6 → ~0.8M tok PPL ~472.  
+See `RESEARCH_PLAN.md` §3 and **[`KAGGLE.md`](KAGGLE.md)**.
 
 ```python
 from config import QAFTConfig
@@ -34,15 +35,32 @@ config = QAFTConfig()
 replace_from_config(model, config)
 ```
 
+### Kaggle
+
+```bash
+# Phase 1b longer smoke
+python run_smoke.py --preset longer \
+  --train-data /kaggle/input/.../train.jsonl \
+  --val-data /kaggle/input/.../val.jsonl \
+  --output-dir /kaggle/working/checkpoints
+
+# Presets: short (~0.8M) | longer (~2.6M) | full_smoke (~5.2M)
+# tokens/step = batch × seq × accum (default 1×512×8 = 4096)
+```
+
 ## Repo layout
 
 Flat modules at repository root (Kaggle-friendly):
 
 - `quantize.py` — quaternary quant + `QuantizedLinear`
-- `model.py` — linear replace + skips
-- `train.py` — `QAFTTrainer`
+- `model.py` — linear replace + skips + inventory
+- `train.py` — `QAFTTrainer` (BF16, 8-bit Adam optional)
 - `eval.py` — perplexity
 - `config.py` — `QAFTConfig`
+- `data.py` — FineWeb-Edu sample builder + packed dataloaders
+- `run_smoke.py` — Phase 1 entry (inventory → orig/shock PPL → short QAFT)
+- `KAGGLE.md` — upload / build / smoke checklist
+- `notebooks/` — Kaggle glue only (not source of truth)
 - `tests/` — unit tests
 
 ## Local checks
