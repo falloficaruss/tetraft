@@ -73,6 +73,45 @@ class _DummyMTPModel(nn.Module):
         return self.lm_head(self.q_proj(self.embed_tokens(x)))
 
 
+class _QwenHybridLayer(nn.Module):
+    """Minimal Qwen3.5-like hybrid block: GDN under linear_attn + FFN mlp."""
+
+    def __init__(self, d):
+        super().__init__()
+        self.linear_attn = nn.ModuleDict(
+            {
+                "in_proj_qkv": nn.Linear(d, d * 3, bias=False),
+                "in_proj_z": nn.Linear(d, d, bias=False),
+                "in_proj_b": nn.Linear(d, 4, bias=False),
+                "in_proj_a": nn.Linear(d, 4, bias=False),
+                "out_proj": nn.Linear(d, d, bias=False),
+            }
+        )
+        self.self_attn = nn.ModuleDict(
+            {
+                "q_proj": nn.Linear(d, d, bias=False),
+                "k_proj": nn.Linear(d, d, bias=False),
+                "v_proj": nn.Linear(d, d, bias=False),
+                "o_proj": nn.Linear(d, d, bias=False),
+            }
+        )
+        self.mlp = nn.ModuleDict(
+            {
+                "gate_proj": nn.Linear(d, d * 2, bias=False),
+                "up_proj": nn.Linear(d, d * 2, bias=False),
+                "down_proj": nn.Linear(d * 2, d, bias=False),
+            }
+        )
+
+
+class _QwenHybridModel(nn.Module):
+    def __init__(self, d=32, n_layers=1):
+        super().__init__()
+        self.embed_tokens = nn.Embedding(100, d)
+        self.layers = nn.ModuleList([_QwenHybridLayer(d) for _ in range(n_layers)])
+        self.lm_head = nn.Linear(d, 100, bias=False)
+
+
 # ===========================================================================
 # Tests
 # ===========================================================================
@@ -166,6 +205,51 @@ class TestReplaceLinearLayers:
         model = _DummyMTPModel(d=64)
         replace_linear_layers(model, c=0.25, skip_mtp=False)
         assert isinstance(model.mtp, QuantizedLinear), "mtp should be quantized when skip_mtp=False"
+
+    # ----- linear_attn / GDN scope -----
+
+    def test_linear_attn_quantized_by_default(self):
+        model = _QwenHybridModel(d=32)
+        replace_linear_layers(model, c=0.25, verbose=False)
+        la = model.layers[0].linear_attn
+        assert isinstance(la["in_proj_qkv"], QuantizedLinear)
+        assert isinstance(la["out_proj"], QuantizedLinear)
+        assert isinstance(model.layers[0].self_attn["q_proj"], QuantizedLinear)
+        assert isinstance(model.layers[0].mlp["gate_proj"], QuantizedLinear)
+
+    def test_skip_linear_attn_leaves_gdn_fp(self):
+        model = _QwenHybridModel(d=32)
+        replace_linear_layers(model, c=0.25, skip_linear_attn=True, verbose=False)
+        la = model.layers[0].linear_attn
+        for key in ("in_proj_qkv", "in_proj_z", "in_proj_b", "in_proj_a", "out_proj"):
+            assert isinstance(la[key], nn.Linear)
+            assert not isinstance(la[key], QuantizedLinear)
+        # Full attn + FFN still quantized
+        assert isinstance(model.layers[0].self_attn["q_proj"], QuantizedLinear)
+        assert isinstance(model.layers[0].self_attn["o_proj"], QuantizedLinear)
+        assert isinstance(model.layers[0].mlp["down_proj"], QuantizedLinear)
+        assert isinstance(model.lm_head, nn.Linear)
+        assert not isinstance(model.lm_head, QuantizedLinear)
+
+    def test_skip_linear_attn_inventory_reason(self):
+        model = _QwenHybridModel(d=32)
+        inv = dump_linear_inventory(model, skip_linear_attn=True)
+        by_name = {r["name"]: r for r in inv["modules"]}
+        gdn = by_name["layers.0.linear_attn.in_proj_qkv"]
+        assert gdn["status"] == "skipped"
+        assert gdn["skip_reason"] == "skip_linear_attn"
+        full = by_name["layers.0.self_attn.q_proj"]
+        assert full["status"] == "eligible"
+        mlp = by_name["layers.0.mlp.gate_proj"]
+        assert mlp["status"] == "eligible"
+
+    def test_replace_from_config_skip_linear_attn(self):
+        model = _QwenHybridModel(d=32)
+        cfg = QAFTConfig(skip_linear_attn=True)
+        replace_from_config(model, cfg, verbose=False)
+        assert isinstance(model.layers[0].linear_attn["out_proj"], nn.Linear)
+        assert not isinstance(model.layers[0].linear_attn["out_proj"], QuantizedLinear)
+        assert isinstance(model.layers[0].mlp["up_proj"], QuantizedLinear)
 
     # ----- scale_mode passthrough -----
 

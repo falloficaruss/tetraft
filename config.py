@@ -26,10 +26,13 @@ class QAFTConfig:
     lr_scheduler_type: Literal["linear", "cosine"] = "linear"
     min_lr_ratio: float = 0.0  # floor = learning_rate * min_lr_ratio (cosine)
 
-    # Logging / saving
+    # Logging / saving (disk-safe defaults for Kaggle)
     logging_steps: int = 10
     eval_steps: int = 100
-    save_steps: int = 500
+    save_steps: int = 0  # 0 = no periodic step_* dumps; best/final still saved
+    save_optimizer: bool = False  # True = full model+opt+sched (resume); False = weights-only
+    max_step_checkpoints: int = 1  # prune older step_* when > 0 and save_steps > 0
+    metrics_filename: str = "metrics.jsonl"  # under output_dir; empty = disable file log
     output_dir: str = "./checkpoints"
 
     # Memory (Phase 1 Kaggle recipe)
@@ -42,6 +45,8 @@ class QAFTConfig:
     skip_embed_tokens: bool = True
     skip_vision: bool = True
     skip_mtp: bool = True
+    # Phase 2 scope ablation: leave Qwen3.5 GDN (path ``linear_attn``) in FP
+    skip_linear_attn: bool = False
 
     # Data (paths empty → resolve under ./data or /kaggle/input)
     train_data_path: str = ""
@@ -76,7 +81,7 @@ SMOKE_PRESETS: Dict[str, dict] = {
         "warmup_steps": 50,
         "logging_steps": 10,
         "eval_steps": 100,
-        "save_steps": 200,
+        "save_steps": 0,
         "learning_rate": 2e-4,
         "lr_scheduler_type": "linear",
         "min_lr_ratio": 0.0,
@@ -87,7 +92,7 @@ SMOKE_PRESETS: Dict[str, dict] = {
         "warmup_steps": 64,
         "logging_steps": 20,
         "eval_steps": 128,
-        "save_steps": 320,
+        "save_steps": 0,
         "learning_rate": 2e-4,
         "lr_scheduler_type": "linear",
         "min_lr_ratio": 0.0,
@@ -99,7 +104,7 @@ SMOKE_PRESETS: Dict[str, dict] = {
         "warmup_steps": 128,
         "logging_steps": 40,
         "eval_steps": 256,
-        "save_steps": 640,
+        "save_steps": 0,
         "learning_rate": 2e-4,
         "lr_scheduler_type": "linear",
         "min_lr_ratio": 0.0,
@@ -112,7 +117,7 @@ SMOKE_PRESETS: Dict[str, dict] = {
         "warmup_steps": 256,
         "logging_steps": 50,
         "eval_steps": 512,
-        "save_steps": 1024,
+        "save_steps": 0,
         "learning_rate": 2e-4,
         "lr_scheduler_type": "cosine",
         "min_lr_ratio": 0.1,
@@ -124,7 +129,7 @@ SMOKE_PRESETS: Dict[str, dict] = {
         "warmup_steps": 512,
         "logging_steps": 50,
         "eval_steps": 1024,
-        "save_steps": 2048,
+        "save_steps": 0,
         "learning_rate": 2e-4,
         "lr_scheduler_type": "cosine",
         "min_lr_ratio": 0.1,

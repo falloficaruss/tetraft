@@ -129,7 +129,7 @@ Replace eligible `nn.Linear` with `QuantizedLinear`.
 - MTP or auxiliary heads if present
 - norms (not Linear)
 
-**Language body (Qwen3.5 hybrid):** FFN, full gated attention projections, Gated DeltaNet projections — **module-scope is an ablation**. Start with all eligible language Linears; if unstable, FFN-first.
+**Language body (Qwen3.5 hybrid):** FFN (`mlp.*`), full gated attention (`self_attn.{q,k,v,o}_proj`), Gated DeltaNet (`linear_attn.{in_proj_qkv,in_proj_z,in_proj_b,in_proj_a,out_proj}`) — **module-scope is an ablation**. Default: all eligible language Linears. Phase 2 arm: `skip_linear_attn=True` leaves path component `linear_attn` in FP. Optional later: FFN-first (also skip `self_attn`).
 
 Report **% parameters quantized** every run.
 

@@ -54,7 +54,7 @@ Files are **flat at root** (no package dir) — required for Kaggle Dataset flat
 - **Scale default:** `absmean_channel` (per `RESEARCH.md`); ablations via config
 - **STE:** identity first; optional clip mode
 - **\(\lambda\) anneal:** supported; trainer may ramp 0→1
-- **Skip:** `lm_head`, embeddings, vision, norms
+- **Skip:** `lm_head`, embeddings, vision, norms; optional `skip_linear_attn` (Qwen3.5 GDN path `linear_attn`)
 - **First model:** `Qwen/Qwen3.5-0.8B-Base` then `Qwen3.5-2B-Base`
 - **Data:** FineWeb-Edu fixed sample (external Kaggle Dataset; not in repo)
 - **Parity target:** original FP model — not BitNet
@@ -83,5 +83,5 @@ pytest tests/ -v
 
 - `replace_linear_layers()` is recursive and idempotent (`QuantizedLinear` left untouched).
 - Gradient checkpointing is enabled in `QAFTTrainer` when configured.
-- Checkpoints: `torch.save` dicts (step, model/opt/scheduler, metrics, config).
-- Kaggle: BF16 + 8-bit Adam + checkpointing for 0.8B; see `PLAN.md`.
+- Checkpoints: disk-safe by default — weights-only `best`/`final`; `save_steps=0` (no `step_*`); opt state only if `save_optimizer=True`. Metrics → `metrics.jsonl`.
+- Kaggle: BF16 + 8-bit Adam + checkpointing for 0.8B; see `PLAN.md` / `KAGGLE.md`.

@@ -91,14 +91,14 @@ Loss after λ=1 ~5.1 → ~3.8. LR still above floor at stop (~3e-5 vs floor 2e-5
 
 These are **design decisions for the next implementation pass**, not a request to blindly scale tokens.
 
-### 5.1 Engineering (before any long Kaggle run)
+### 5.1 Engineering (before any long Kaggle run) ✅
 
-| Item | Intent |
-|------|--------|
-| Weights-only `best` / `final` by default | Avoid multi-GB Adam dumps |
-| No (or rare) periodic `step_*` saves; prune if enabled | Disk |
-| Log PPL/loss to JSON/CSV without full state every eval | Observability without disk death |
-| Clear `/kaggle/working/checkpoints` before long jobs | Ops |
+| Item | Intent | Status |
+|------|--------|--------|
+| Weights-only `best` / `final` by default | Avoid multi-GB Adam dumps | ✅ `save_optimizer=False` |
+| No (or rare) periodic `step_*` saves; prune if enabled | Disk | ✅ `save_steps=0`; `max_step_checkpoints` |
+| Log PPL/loss to JSON/CSV without full state every eval | Observability without disk death | ✅ `metrics.jsonl` |
+| Clear `/kaggle/working/checkpoints` before long jobs | Ops | (manual) |
 
 ### 5.2 Training-schedule architecture
 
@@ -118,7 +118,7 @@ Treat schedule as an **ablation factor**, not a silent default flip.
 
 | Priority | Factor | Why |
 |----------|--------|-----|
-| **P0** | **Module scope** (all Linear vs exclude GDN / linear-attn) | Qwen3.5 hybrid; GDN may dominate residual shock |
+| **P0** | **Module scope** (all Linear vs exclude GDN / linear-attn) | ✅ knob: `skip_linear_attn` / `--skip-linear-attn` (path `linear_attn`); Kaggle scout TBD |
 | **P0** | **\(c\)** ∈ {0.25, 0.5} | Grid geometry |
 | **P0** | **scale_mode** | absmean_channel vs tensor / absmax |
 | **P1** | λ schedule, STE, peak/late LR | Training dynamics |

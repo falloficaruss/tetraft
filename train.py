@@ -1,7 +1,10 @@
+import json
 import logging
 import math
 import os
+import re
 from functools import partial
+from typing import Any, Dict, Optional
 
 import torch
 from torch.optim import AdamW
@@ -12,6 +15,8 @@ from eval import evaluate_perplexity, model_device
 from quantize import QuantizedLinear
 
 logger = logging.getLogger(__name__)
+
+_STEP_CKPT_RE = re.compile(r"^checkpoint-step_(\d+)$")
 
 
 def _build_optimizer(model, config):
@@ -162,6 +167,14 @@ class QAFTTrainer:
         self.best_perplexity = float("inf")
         self.metrics = {"step": [], "loss": [], "lr": [], "perplexity": [], "lambda": []}
         self._autocast_dtype = _autocast_dtype(config, self.device)
+        self._metrics_path = self._resolve_metrics_path()
+
+    def _resolve_metrics_path(self) -> Optional[str]:
+        name = getattr(self.config, "metrics_filename", "metrics.jsonl") or ""
+        name = str(name).strip()
+        if not name:
+            return None
+        return os.path.join(self.config.output_dir, name)
 
     def _set_lambda(self, lambda_val: float) -> None:
         for module in self.model.modules():
@@ -173,10 +186,19 @@ class QAFTTrainer:
             return min(1.0, self.global_step / self.config.quant_warmup_steps)
         return 1.0
 
+    def _append_metrics_row(self, row: Dict[str, Any]) -> None:
+        """Append one JSONL metrics row (loss/PPL/λ) without full model state."""
+        if self._metrics_path is None:
+            return
+        os.makedirs(os.path.dirname(self._metrics_path) or ".", exist_ok=True)
+        with open(self._metrics_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(row, default=str) + "\n")
+
     def train(self, train_dataloader, eval_dataloader=None):
         self.model.train()
         self.optimizer.zero_grad(set_to_none=True)
         accum = max(1, self.config.gradient_accumulation_steps)
+        save_steps = int(getattr(self.config, "save_steps", 0) or 0)
 
         for _ in range(self.config.num_epochs):
             for batch in train_dataloader:
@@ -232,6 +254,15 @@ class QAFTTrainer:
                         lr,
                         lambda_val,
                     )
+                    self._append_metrics_row(
+                        {
+                            "event": "log",
+                            "step": self.global_step,
+                            "loss": avg_loss,
+                            "lr": lr,
+                            "lambda": lambda_val,
+                        }
+                    )
                     self.total_loss = 0.0
 
                 if (
@@ -242,9 +273,19 @@ class QAFTTrainer:
                     if ppl < self.best_perplexity:
                         self.best_perplexity = ppl
                         self._save_checkpoint("best")
+                    self._append_metrics_row(
+                        {
+                            "event": "eval",
+                            "step": self.global_step,
+                            "perplexity": ppl,
+                            "best_perplexity": self.best_perplexity,
+                            "lambda": self._current_lambda(),
+                        }
+                    )
 
-                if self.global_step % self.config.save_steps == 0:
+                if save_steps > 0 and self.global_step % save_steps == 0:
                     self._save_checkpoint(f"step_{self.global_step}")
+                    self._prune_step_checkpoints()
 
             if self.global_step >= self.config.max_steps:
                 break
@@ -260,27 +301,75 @@ class QAFTTrainer:
         self.model.train()
         return ppl
 
-    def _save_checkpoint(self, tag):
+    def _save_checkpoint(self, tag: str, *, full: Optional[bool] = None) -> str:
+        """Save checkpoint. Default is weights-only (no Adam); set full=True to resume."""
         os.makedirs(self.config.output_dir, exist_ok=True)
         path = os.path.join(self.config.output_dir, f"checkpoint-{tag}")
-        torch.save(
-            {
-                "step": self.global_step,
-                "model_state_dict": self.model.state_dict(),
-                "optimizer_state_dict": self.optimizer.state_dict(),
-                "scheduler_state_dict": self.scheduler.state_dict(),
-                "best_perplexity": self.best_perplexity,
-                "config": self.config,
-            },
-            path,
+        include_opt = (
+            bool(getattr(self.config, "save_optimizer", False))
+            if full is None
+            else bool(full)
         )
-        logger.info("Checkpoint saved: %s", path)
+        payload: Dict[str, Any] = {
+            "step": self.global_step,
+            "model_state_dict": self.model.state_dict(),
+            "best_perplexity": self.best_perplexity,
+            "config": self.config,
+            "weights_only": not include_opt,
+        }
+        if include_opt:
+            payload["optimizer_state_dict"] = self.optimizer.state_dict()
+            payload["scheduler_state_dict"] = self.scheduler.state_dict()
+        torch.save(payload, path)
+        kind = "full" if include_opt else "weights-only"
+        logger.info("Checkpoint saved (%s): %s", kind, path)
+        return path
 
-    def load_checkpoint(self, path):
+    def _prune_step_checkpoints(self) -> None:
+        """Keep at most ``max_step_checkpoints`` newest ``checkpoint-step_*`` files."""
+        keep = int(getattr(self.config, "max_step_checkpoints", 1) or 0)
+        if keep < 0:
+            return
+        out = self.config.output_dir
+        if not os.path.isdir(out):
+            return
+        found = []
+        for name in os.listdir(out):
+            m = _STEP_CKPT_RE.match(name)
+            if m:
+                found.append((int(m.group(1)), os.path.join(out, name)))
+        found.sort(key=lambda x: x[0])
+        # keep == 0 means drop all periodic step dumps after write (extreme disk mode)
+        to_delete = found if keep == 0 else found[:-keep]
+        for _, path in to_delete:
+            try:
+                os.remove(path)
+                logger.info("Pruned step checkpoint: %s", path)
+            except OSError as e:
+                logger.warning("Failed to prune %s: %s", path, e)
+
+    def load_checkpoint(self, path: str, *, load_optimizer: Optional[bool] = None) -> None:
+        """Load weights; optimizer/scheduler only if present and requested."""
         ckpt = torch.load(path, map_location=self.device, weights_only=False)
         self.model.load_state_dict(ckpt["model_state_dict"])
-        self.optimizer.load_state_dict(ckpt["optimizer_state_dict"])
-        self.scheduler.load_state_dict(ckpt["scheduler_state_dict"])
         self.global_step = ckpt["step"]
         self.best_perplexity = ckpt.get("best_perplexity", float("inf"))
-        logger.info("Checkpoint loaded: %s (step %d)", path, self.global_step)
+
+        has_opt = "optimizer_state_dict" in ckpt and "scheduler_state_dict" in ckpt
+        want_opt = has_opt if load_optimizer is None else bool(load_optimizer)
+        if want_opt and has_opt:
+            self.optimizer.load_state_dict(ckpt["optimizer_state_dict"])
+            self.scheduler.load_state_dict(ckpt["scheduler_state_dict"])
+            logger.info(
+                "Checkpoint loaded (full): %s (step %d)", path, self.global_step
+            )
+        else:
+            if load_optimizer and not has_opt:
+                logger.warning(
+                    "Checkpoint %s has no optimizer state; loaded weights only", path
+                )
+            logger.info(
+                "Checkpoint loaded (weights-only): %s (step %d)",
+                path,
+                self.global_step,
+            )

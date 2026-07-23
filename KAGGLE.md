@@ -36,16 +36,17 @@ If `KeyError: qwen3_5`:
 
 ---
 
-## C. Disk lesson (blocking for long jobs)
+## C. Disk lesson (implemented)
 
 `scale_25m` filled Kaggle working disk via repeated **full model + optimizer** checkpoints.
 
-**Before the next long run, implement/use:**
-- Weights-only `best` / `final` (no Adam state unless resume is required)
-- No frequent `step_*` dumps (or hard prune + limit)
-- Clear `/kaggle/working/checkpoints` before start
+**Defaults now (in code):**
+- Weights-only `best` / `final` (`save_optimizer=False`)
+- `save_steps=0` — no periodic `step_*`; if enabled, prune via `max_step_checkpoints`
+- Loss/PPL logged to `metrics.jsonl` under `output_dir` (not full state)
+- Resume: pass `--save-optimizer` only when you need full state
 
-Until then, prefer **short scouts (~5–10M)** only.
+**Ops:** clear `/kaggle/working/checkpoints` before long jobs.
 
 ---
 
@@ -56,7 +57,7 @@ Until then, prefer **short scouts (~5–10M)** only.
 **Recommended direction:**
 1. **Control DNA** = full_smoke (λ_warmup≈**256**, peak lr 2e-4, same quant defaults)
 2. **Phase 2 scouts** @ ~5–10M, one factor at a time:
-   - module scope (exclude GDN / linear-attn)
+   - module scope: control vs `--skip-linear-attn` (exclude GDN path `linear_attn`)
    - \(c\) ∈ {0.25, 0.5}
    - scale_mode
 3. **Long-run LR** as a separate decision: mid-run LR + late anneal/floor — don’t assume full-horizon linear→0 scales

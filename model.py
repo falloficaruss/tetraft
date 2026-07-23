@@ -21,6 +21,12 @@ SKIP_MTP_PATTERNS: Set[str] = {
     "MTP",
 }
 
+# Qwen3.5 hybrid: Gated DeltaNet lives under decoder ``linear_attn``
+# (Linears: in_proj_qkv/z/b/a, out_proj). Full attn is ``self_attn``; FFN is ``mlp``.
+SKIP_LINEAR_ATTN_PATTERNS: Set[str] = {
+    "linear_attn",
+}
+
 
 def _matches_any(name: str, patterns: Set[str]) -> bool:
     """Return ``True`` if *name* (or any dot-separated component) is in *patterns*."""
@@ -36,6 +42,7 @@ def _skip_reason(
     skip_names: Set[str],
     skip_vision: bool,
     skip_mtp: bool,
+    skip_linear_attn: bool = False,
 ) -> Optional[str]:
     """Return a human-readable skip reason, or ``None`` if the module is eligible."""
     leaf = name.rsplit(".", 1)[-1] if name else name
@@ -49,6 +56,8 @@ def _skip_reason(
         return "skip_vision"
     if skip_mtp and _matches_any(name, SKIP_MTP_PATTERNS):
         return "skip_mtp"
+    if skip_linear_attn and _matches_any(name, SKIP_LINEAR_ATTN_PATTERNS):
+        return "skip_linear_attn"
     if isinstance(module, QuantizedLinear):
         return "already_quantized"
     if not isinstance(module, nn.Linear):
@@ -62,6 +71,7 @@ def dump_linear_inventory(
     skip_embed_tokens: bool = True,
     skip_vision: bool = True,
     skip_mtp: bool = True,
+    skip_linear_attn: bool = False,
 ) -> Dict[str, Any]:
     """Inventory all ``nn.Linear`` / ``QuantizedLinear`` modules and skip policy.
 
@@ -87,7 +97,9 @@ def dump_linear_inventory(
             n_params = module.weight.numel() + (
                 module.bias.numel() if module.bias is not None else 0
             )
-            reason = _skip_reason(name, module, skip_names, skip_vision, skip_mtp)
+            reason = _skip_reason(
+                name, module, skip_names, skip_vision, skip_mtp, skip_linear_attn
+            )
             # Already quantized counts as eligible (would be / was replaced).
             status = "quantized"
             n_eligible += 1
@@ -113,7 +125,9 @@ def dump_linear_inventory(
         n_params = module.weight.numel() + (
             module.bias.numel() if module.bias is not None else 0
         )
-        reason = _skip_reason(name, module, skip_names, skip_vision, skip_mtp)
+        reason = _skip_reason(
+            name, module, skip_names, skip_vision, skip_mtp, skip_linear_attn
+        )
         if reason is None:
             status = "eligible"
             n_eligible += 1
@@ -187,6 +201,7 @@ def replace_from_config(model: nn.Module, config, verbose: bool = True) -> nn.Mo
         skip_embed_tokens=config.skip_embed_tokens,
         skip_vision=config.skip_vision,
         skip_mtp=config.skip_mtp,
+        skip_linear_attn=bool(getattr(config, "skip_linear_attn", False)),
         verbose=verbose,
     )
 
@@ -200,12 +215,16 @@ def replace_linear_layers(
     skip_embed_tokens: bool = True,
     skip_vision: bool = True,
     skip_mtp: bool = True,
+    skip_linear_attn: bool = False,
     verbose: bool = True,
 ) -> nn.Module:
     """Replace all eligible ``nn.Linear`` submodules with ``QuantizedLinear``.
 
     Idempotent — already-replaced ``QuantizedLinear`` modules are left untouched.
     Returns the model (modified in-place).
+
+    When ``skip_linear_attn`` is True, any module path containing ``linear_attn``
+    is left in full precision (Qwen3.5 Gated DeltaNet scope ablation).
     """
     # Build a set of module names to skip (exact or wildcard).
     skip_names: Set[str] = set()
@@ -225,6 +244,7 @@ def replace_linear_layers(
         skip_names=skip_names,
         skip_vision=skip_vision,
         skip_mtp=skip_mtp,
+        skip_linear_attn=skip_linear_attn,
         prefix="",
     )
 
@@ -252,6 +272,7 @@ def _replace_in_module(
     skip_names: Set[str],
     skip_vision: bool,
     skip_mtp: bool,
+    skip_linear_attn: bool,
     prefix: str,
 ) -> None:
     for name, child in list(module.named_children()):
@@ -263,6 +284,8 @@ def _replace_in_module(
         if skip_vision and _matches_any(full_name, SKIP_VISION_PATTERNS):
             continue
         if skip_mtp and _matches_any(full_name, SKIP_MTP_PATTERNS):
+            continue
+        if skip_linear_attn and _matches_any(full_name, SKIP_LINEAR_ATTN_PATTERNS):
             continue
         # ----- idempotency -----
         if isinstance(child, QuantizedLinear):
@@ -290,5 +313,6 @@ def _replace_in_module(
                 skip_names=skip_names,
                 skip_vision=skip_vision,
                 skip_mtp=skip_mtp,
+                skip_linear_attn=skip_linear_attn,
                 prefix=full_name,
             )

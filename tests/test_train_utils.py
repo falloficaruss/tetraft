@@ -1,5 +1,8 @@
 """Tests for trainer helpers and eval device utility (no full model download)."""
 
+import json
+import os
+
 import torch
 import torch.nn as nn
 
@@ -8,6 +11,7 @@ from eval import evaluate_perplexity, model_device
 from model import dump_linear_inventory, replace_from_config, set_quant_lambda
 from quantize import QuantizedLinear
 from train import (
+    QAFTTrainer,
     _autocast_dtype,
     _build_optimizer,
     _build_scheduler,
@@ -179,3 +183,146 @@ class TestScheduler:
             sched.step()
         lr = sched.get_last_lr()[0]
         assert abs(lr - 1e-4) < 1e-6
+
+
+class TestDiskSafeCheckpoints:
+    """Weights-only defaults, optional full save, prune, metrics JSONL."""
+
+    def _tiny_trainer(self, tmp_path, **cfg_kw):
+        model = _TinyLM()
+        defaults = dict(
+            use_8bit_adam=False,
+            use_bf16=False,
+            gradient_checkpointing=False,
+            output_dir=str(tmp_path),
+            save_optimizer=False,
+            save_steps=0,
+            max_steps=4,
+            logging_steps=1,
+            eval_steps=100,
+            warmup_steps=0,
+            quant_warmup_steps=0,
+            gradient_accumulation_steps=1,
+            metrics_filename="metrics.jsonl",
+        )
+        defaults.update(cfg_kw)
+        cfg = QAFTConfig(**defaults)
+        return QAFTTrainer(model, tokenizer=None, config=cfg), cfg
+
+    def test_weights_only_default_omits_optimizer(self, tmp_path):
+        trainer, _ = self._tiny_trainer(tmp_path)
+        trainer.global_step = 3
+        path = trainer._save_checkpoint("best")
+        ckpt = torch.load(path, map_location="cpu", weights_only=False)
+        assert "model_state_dict" in ckpt
+        assert "optimizer_state_dict" not in ckpt
+        assert "scheduler_state_dict" not in ckpt
+        assert ckpt.get("weights_only") is True
+        assert ckpt["step"] == 3
+
+    def test_full_save_includes_optimizer(self, tmp_path):
+        trainer, _ = self._tiny_trainer(tmp_path, save_optimizer=True)
+        trainer.global_step = 2
+        path = trainer._save_checkpoint("final")
+        ckpt = torch.load(path, map_location="cpu", weights_only=False)
+        assert "optimizer_state_dict" in ckpt
+        assert "scheduler_state_dict" in ckpt
+        assert ckpt.get("weights_only") is False
+
+    def test_full_override_kwarg(self, tmp_path):
+        trainer, _ = self._tiny_trainer(tmp_path, save_optimizer=False)
+        path = trainer._save_checkpoint("resume", full=True)
+        ckpt = torch.load(path, map_location="cpu", weights_only=False)
+        assert "optimizer_state_dict" in ckpt
+
+    def test_load_weights_only_skips_missing_opt(self, tmp_path):
+        trainer, _ = self._tiny_trainer(tmp_path)
+        trainer.global_step = 5
+        trainer.best_perplexity = 12.5
+        path = trainer._save_checkpoint("best")
+
+        trainer2, _ = self._tiny_trainer(tmp_path)
+        trainer2.load_checkpoint(path)
+        assert trainer2.global_step == 5
+        assert trainer2.best_perplexity == 12.5
+
+    def test_load_full_restores_opt(self, tmp_path):
+        trainer, _ = self._tiny_trainer(tmp_path, save_optimizer=True)
+        trainer.global_step = 7
+        path = trainer._save_checkpoint("final")
+        trainer2, _ = self._tiny_trainer(tmp_path, save_optimizer=True)
+        trainer2.load_checkpoint(path)
+        assert trainer2.global_step == 7
+
+    def test_prune_keeps_newest_n(self, tmp_path):
+        trainer, cfg = self._tiny_trainer(tmp_path, max_step_checkpoints=2)
+        for step in (10, 20, 30):
+            trainer.global_step = step
+            trainer._save_checkpoint(f"step_{step}")
+        trainer._prune_step_checkpoints()
+        names = sorted(os.listdir(cfg.output_dir))
+        step_names = [n for n in names if n.startswith("checkpoint-step_")]
+        assert step_names == ["checkpoint-step_20", "checkpoint-step_30"]
+
+    def test_prune_zero_deletes_all_step(self, tmp_path):
+        trainer, cfg = self._tiny_trainer(tmp_path, max_step_checkpoints=0)
+        trainer.global_step = 10
+        trainer._save_checkpoint("step_10")
+        trainer._prune_step_checkpoints()
+        step_names = [
+            n for n in os.listdir(cfg.output_dir) if n.startswith("checkpoint-step_")
+        ]
+        assert step_names == []
+
+    def test_metrics_jsonl_on_log_and_eval(self, tmp_path):
+        trainer, cfg = self._tiny_trainer(
+            tmp_path,
+            max_steps=2,
+            logging_steps=1,
+            eval_steps=1,
+            save_steps=0,
+        )
+        ids = torch.randint(0, 32, (1, 8))
+        batch = {
+            "input_ids": ids,
+            "labels": ids.clone(),
+            "attention_mask": torch.ones_like(ids),
+        }
+        loader = [batch, batch]
+        trainer.train(loader, eval_dataloader=loader)
+
+        path = os.path.join(cfg.output_dir, "metrics.jsonl")
+        assert os.path.isfile(path)
+        rows = [json.loads(line) for line in open(path, encoding="utf-8")]
+        assert any(r.get("event") == "log" for r in rows)
+        assert any(r.get("event") == "eval" and "perplexity" in r for r in rows)
+        assert any(n.startswith("checkpoint-best") for n in os.listdir(cfg.output_dir))
+
+    def test_save_steps_zero_default_in_config(self):
+        cfg = QAFTConfig()
+        assert cfg.save_steps == 0
+        assert cfg.save_optimizer is False
+        apply_smoke_preset(cfg, "full_smoke")
+        assert cfg.save_steps == 0
+
+    def test_train_loop_no_step_ckpts_when_save_steps_zero(self, tmp_path):
+        trainer, cfg = self._tiny_trainer(
+            tmp_path,
+            max_steps=2,
+            logging_steps=1,
+            eval_steps=1000,
+            save_steps=0,
+        )
+        ids = torch.randint(0, 32, (1, 8))
+        batch = {
+            "input_ids": ids,
+            "labels": ids.clone(),
+            "attention_mask": torch.ones_like(ids),
+        }
+        loader = [batch, batch, batch]
+        trainer.train(loader, eval_dataloader=None)
+        names = os.listdir(cfg.output_dir)
+        assert any(n == "checkpoint-final" for n in names)
+        assert not any(n.startswith("checkpoint-step_") for n in names)
+        # best only on eval improvement — no eval → no best required
+        assert os.path.isfile(os.path.join(cfg.output_dir, "metrics.jsonl"))

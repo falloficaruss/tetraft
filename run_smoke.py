@@ -83,7 +83,22 @@ def _parse_args(argv=None):
     )
     p.add_argument("--logging-steps", type=int, default=None)
     p.add_argument("--eval-steps", type=int, default=None)
-    p.add_argument("--save-steps", type=int, default=None)
+    p.add_argument(
+        "--save-steps",
+        type=int,
+        default=None,
+        help="Periodic step_* interval; 0 disables (default). best/final always saved.",
+    )
+    p.add_argument(
+        "--save-optimizer",
+        action="store_true",
+        help="Include optimizer/scheduler state in checkpoints (large; for resume only).",
+    )
+    p.add_argument(
+        "--skip-linear-attn",
+        action="store_true",
+        help="Phase 2 scope: do not quantize GDN modules under path 'linear_attn'.",
+    )
     p.add_argument("--seed", type=int, default=None)
     p.add_argument("--device-map", type=str, default="auto", help="HF device_map (auto|cpu|cuda)")
     return p.parse_args(argv)
@@ -127,6 +142,10 @@ def _apply_cli_overrides(config: QAFTConfig, args) -> QAFTConfig:
         config.eval_steps = args.eval_steps
     if getattr(args, "save_steps", None) is not None:
         config.save_steps = args.save_steps
+    if getattr(args, "save_optimizer", False):
+        config.save_optimizer = True
+    if getattr(args, "skip_linear_attn", False):
+        config.skip_linear_attn = True
     if args.seed is not None:
         config.seed = args.seed
     return config
@@ -215,6 +234,8 @@ def run_smoke(args=None) -> Dict[str, Any]:
         ("logging_steps", None),
         ("eval_steps", None),
         ("save_steps", None),
+        ("save_optimizer", False),
+        ("skip_linear_attn", False),
     ):
         if not hasattr(ns, field):
             setattr(ns, field, default)
@@ -253,6 +274,7 @@ def run_smoke(args=None) -> Dict[str, Any]:
         skip_embed_tokens=config.skip_embed_tokens,
         skip_vision=config.skip_vision,
         skip_mtp=config.skip_mtp,
+        skip_linear_attn=config.skip_linear_attn,
     )
     results["inventory_summary"] = inventory["summary"]
     inv_path = Path(config.output_dir) / "linear_inventory.json"
@@ -297,16 +319,15 @@ def run_smoke(args=None) -> Dict[str, Any]:
             if not has_q:
                 replace_from_config(model, config, verbose=True)
 
-        # Ultra-short runs: denser logs
+        # Ultra-short runs: denser logs (still weights-only best/final; no step_* spam)
         if config.max_steps <= 50:
             config.logging_steps = max(1, config.max_steps // 5)
             config.eval_steps = max(1, config.max_steps // 2)
-            config.save_steps = config.max_steps
 
         logger.info(
             "Starting QAFT: max_steps=%d, tokens_budget≈%s, seq=%d, batch=%d, "
             "accum=%d, λ_warmup=%d, lr_warmup=%d, lr_sched=%s, min_lr_ratio=%.3f, "
-            "bf16=%s, 8bit_adam=%s",
+            "bf16=%s, 8bit_adam=%s, save_steps=%d, save_optimizer=%s",
             config.max_steps,
             f"{tokens_budget:,}",
             config.seq_length,
@@ -318,6 +339,8 @@ def run_smoke(args=None) -> Dict[str, Any]:
             config.min_lr_ratio,
             config.use_bf16,
             config.use_8bit_adam,
+            config.save_steps,
+            config.save_optimizer,
         )
         trainer = QAFTTrainer(model, tokenizer, config)
         trainer.train(train_loader, eval_dataloader=val_loader)
