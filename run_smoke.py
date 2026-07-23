@@ -1,4 +1,4 @@
-"""Phase 1 / 1b smoke entrypoint: inventory → original PPL → shock PPL → QAFT.
+"""QAFT entrypoint: inventory → original PPL → shock PPL → train.
 
 Designed for Kaggle notebooks / scripts. Logic stays in flat modules; this file
 only wires config, data paths, and the evaluation / train sequence.
@@ -8,8 +8,8 @@ Example (Kaggle, after attaching code + FineWeb sample datasets)::
     # Phase 1 short smoke (~0.8M tokens)
     python run_smoke.py --preset short --train-data ... --val-data ...
 
-    # Phase 1b longer smoke (~2.5M tokens)
-    python run_smoke.py --preset longer --train-data ... --val-data ...
+    # Phase 1c scale-up (~25M tokens, cosine LR + floor)
+    python run_smoke.py --preset scale_25m --train-data ... --val-data ...
 """
 
 from __future__ import annotations
@@ -38,13 +38,13 @@ logger = logging.getLogger(__name__)
 
 
 def _parse_args(argv=None):
-    p = argparse.ArgumentParser(description="TetraFT Phase 1 / 1b smoke on 0.8B")
+    p = argparse.ArgumentParser(description="TetraFT QAFT run (smoke / scale) on 0.8B")
     p.add_argument(
         "--preset",
         type=str,
         default="short",
         choices=sorted(SMOKE_PRESETS.keys()),
-        help="Smoke schedule preset (CLI flags override preset values)",
+        help="Run preset (CLI flags override preset values)",
     )
     p.add_argument("--model-name", type=str, default=None, help="Override QAFTConfig.model_name")
     p.add_argument("--train-data", type=str, default=None)
@@ -56,18 +56,31 @@ def _parse_args(argv=None):
         "--max-steps",
         type=int,
         default=None,
-        help="QAFT steps (tokens ≈ steps×batch×seq×accum)",
+        help="QAFT micro-steps (tokens ≈ steps×batch×seq×accum)",
     )
     p.add_argument("--max-eval-batches", type=int, default=20)
-    p.add_argument("--max-train-texts", type=int, default=None, help="Cap docs loaded for smoke packing")
+    p.add_argument("--max-train-texts", type=int, default=None, help="Cap docs loaded for packing")
     p.add_argument("--max-val-texts", type=int, default=None)
     p.add_argument("--skip-train", action="store_true", help="Only inventory + original + shock PPL")
     p.add_argument("--skip-shock", action="store_true")
     p.add_argument("--no-bf16", action="store_true")
     p.add_argument("--no-8bit-adam", action="store_true")
     p.add_argument("--quant-warmup-steps", type=int, default=None)
-    p.add_argument("--warmup-steps", type=int, default=None, help="LR warmup steps")
+    p.add_argument("--warmup-steps", type=int, default=None, help="LR warmup micro-steps")
     p.add_argument("--learning-rate", type=float, default=None)
+    p.add_argument(
+        "--lr-scheduler",
+        type=str,
+        default=None,
+        choices=["linear", "cosine"],
+        help="Override lr_scheduler_type",
+    )
+    p.add_argument(
+        "--min-lr-ratio",
+        type=float,
+        default=None,
+        help="Cosine floor as fraction of peak LR (e.g. 0.1)",
+    )
     p.add_argument("--logging-steps", type=int, default=None)
     p.add_argument("--eval-steps", type=int, default=None)
     p.add_argument("--save-steps", type=int, default=None)
@@ -104,6 +117,10 @@ def _apply_cli_overrides(config: QAFTConfig, args) -> QAFTConfig:
         config.warmup_steps = args.warmup_steps
     if getattr(args, "learning_rate", None) is not None:
         config.learning_rate = args.learning_rate
+    if getattr(args, "lr_scheduler", None) is not None:
+        config.lr_scheduler_type = args.lr_scheduler
+    if getattr(args, "min_lr_ratio", None) is not None:
+        config.min_lr_ratio = args.min_lr_ratio
     if getattr(args, "logging_steps", None) is not None:
         config.logging_steps = args.logging_steps
     if getattr(args, "eval_steps", None) is not None:
@@ -193,6 +210,8 @@ def run_smoke(args=None) -> Dict[str, Any]:
     for field, default in (
         ("warmup_steps", None),
         ("learning_rate", None),
+        ("lr_scheduler", None),
+        ("min_lr_ratio", None),
         ("logging_steps", None),
         ("eval_steps", None),
         ("save_steps", None),
@@ -205,13 +224,16 @@ def run_smoke(args=None) -> Dict[str, Any]:
 
     tokens_budget = config.tokens_budget()
     logger.info(
-        "Smoke preset=%s max_steps=%d tokens_budget≈%s (batch=%d seq=%d accum=%d)",
+        "Run preset=%s max_steps=%d tokens_budget≈%s (batch=%d seq=%d accum=%d) "
+        "lr_sched=%s min_lr_ratio=%.3f",
         ns.preset,
         config.max_steps,
         f"{tokens_budget:,}",
         config.batch_size,
         config.seq_length,
         config.gradient_accumulation_steps,
+        config.lr_scheduler_type,
+        config.min_lr_ratio,
     )
 
     results: Dict[str, Any] = {
@@ -282,8 +304,9 @@ def run_smoke(args=None) -> Dict[str, Any]:
             config.save_steps = config.max_steps
 
         logger.info(
-            "Starting QAFT smoke: max_steps=%d, tokens_budget≈%s, seq=%d, batch=%d, "
-            "accum=%d, λ_warmup=%d, lr_warmup=%d, bf16=%s, 8bit_adam=%s",
+            "Starting QAFT: max_steps=%d, tokens_budget≈%s, seq=%d, batch=%d, "
+            "accum=%d, λ_warmup=%d, lr_warmup=%d, lr_sched=%s, min_lr_ratio=%.3f, "
+            "bf16=%s, 8bit_adam=%s",
             config.max_steps,
             f"{tokens_budget:,}",
             config.seq_length,
@@ -291,6 +314,8 @@ def run_smoke(args=None) -> Dict[str, Any]:
             config.gradient_accumulation_steps,
             config.quant_warmup_steps,
             config.warmup_steps,
+            config.lr_scheduler_type,
+            config.min_lr_ratio,
             config.use_bf16,
             config.use_8bit_adam,
         )

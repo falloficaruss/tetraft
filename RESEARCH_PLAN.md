@@ -90,26 +90,37 @@
 
 **Kaggle short-smoke baseline (record):** orig ≈ 17.7 → shock ≫ 1e6 → after ~0.8M tok ≈ 472; loss finite; 66% params quantized (lm_head skipped).
 
-### Phase 1b — Longer smoke (1–5M tokens)  ← **NEXT**
+### Phase 1b — Longer smoke (1–5M tokens)  ✅ **COMPLETE**
+
+| # | Task | Status |
+|---|------|--------|
+| 1b.1–1b.2 | `full_smoke` ~5.24M tok | ✅ end PPL **~79.4** (after/orig ≈ 4.5) |
+| 1b.3 | PPL vs steps after λ=1 | ✅ 388 → 160 → 133 → 100 → 90 → **79** |
+
+Curve after λ=1 still falling at stop; linear LR hit 0 (fixed in 1c).
+
+### Phase 1c — Scale-up same recipe  ← **NEXT**
+
+Same quant defaults; **cosine LR + `min_lr_ratio=0.1`**.
 
 | # | Task |
 |---|------|
-| 1b.1 | Run `--preset longer` (~2.6M tok) on same data/model |
-| 1b.2 | Optional `--preset full_smoke` (~5.2M tok) |
-| 1b.3 | Log PPL vs steps/tokens after λ=1; confirm trend below ~472 |
-
-Presets in `config.SMOKE_PRESETS` / `run_smoke.py --preset`. Details: **`KAGGLE.md`**.
+| 1c.1 | `--preset scale_25m` (~25.0M tok) |
+| 1c.2 | Optional `--preset scale_50m` if still steep |
+| 1c.3 | Gate: PPL &lt; 79 → then Phase 2 ablations |
 
 ```bash
-python run_smoke.py --preset longer --train-data .../train.jsonl --val-data .../val.jsonl \
+python run_smoke.py --preset scale_25m --train-data .../train.jsonl --val-data .../val.jsonl \
   --output-dir /kaggle/working/checkpoints
 ```
 
+Details: **`KAGGLE.md`**.
+
 ---
 
-### Phase 2 — 0.8B recipe search
+### Phase 2 — 0.8B recipe search  (after 1c)
 
-Fixed data order; optimize **gap to original**.
+Fixed data order; optimize **gap to original**. Control = 1c recipe.
 
 | Factor | Levels |
 |--------|--------|
@@ -118,9 +129,9 @@ Fixed data order; optimize **gap to original**.
 | \(\lambda\) | hard / linear / delayed |
 | ste | identity / clip |
 | scope | all eligible Linear / FFN-heavy / exclude GDN |
-| tokens | ~50M per ablation; 100–200M for best recipe |
+| tokens | scout ~10M; confirm 20–50M; main 100–200M for best |
 
-Optional: CE + KL(original) if CE alone stalls.
+Optional: CE + KL(original) if CE alone stalls. Harness after `scale_25m` results.
 
 ---
 
@@ -208,11 +219,11 @@ Optional: CE + KL(original) if CE alone stalls.
 
 ## 8. Immediate next step
 
-### → **Phase 1b** longer smoke on Kaggle
+### → **Phase 1c** scale-up on Kaggle
 
-1. Re-upload **`tetraft-code`** if needed (presets in `config.py` / `run_smoke.py`)  
-2. `python run_smoke.py --preset longer` (or notebook `PRESET = "longer"`)  
-3. Compare `ppl_after_smoke` and curve vs short baseline (~472); gap still vs orig ~17.7  
-4. Then Phase 2 recipe search on fixed 50M data  
+1. Re-upload **`tetraft-code`** (cosine scheduler + `scale_25m`)  
+2. `python run_smoke.py --preset scale_25m` (notebook `PRESET = "scale_25m"`)  
+3. Compare end PPL vs **79.4**; confirm LR floor ≠ 0  
+4. Then Phase 2 ablations (or optional `scale_50m` if still falling fast)  
 
 Details: `KAGGLE.md`.

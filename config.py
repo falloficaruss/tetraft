@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Literal, Optional
+from typing import Dict, Literal, Optional
 
 
 @dataclass
@@ -22,6 +22,9 @@ class QAFTConfig:
     gradient_accumulation_steps: int = 8
     max_grad_norm: float = 1.0
     num_epochs: int = 1
+    # LR schedule: linear dies at 0 (ok for short smoke); cosine+floor for scale-up
+    lr_scheduler_type: Literal["linear", "cosine"] = "linear"
+    min_lr_ratio: float = 0.0  # floor = learning_rate * min_lr_ratio (cosine)
 
     # Logging / saving
     logging_steps: int = 10
@@ -51,7 +54,7 @@ class QAFTConfig:
     data_hf_revision: Optional[str] = None
 
     def tokens_per_step(self) -> int:
-        """Approx tokens processed per optimizer micro-step (batch × seq × accum)."""
+        """Approx tokens processed per micro-step (batch × seq × accum)."""
         return (
             max(1, self.batch_size)
             * max(1, self.seq_length)
@@ -63,10 +66,10 @@ class QAFTConfig:
         return self.max_steps * self.tokens_per_step()
 
 
-# Smoke / longer-smoke presets (Phase 1 / 1b). Explicit CLI flags override these.
 # Token math @ defaults batch=1, seq=512, accum=8 → 4096 tokens / micro-step.
-SMOKE_PRESETS = {
-    # 200 × 4096 ≈ 0.82M — pipeline check (Phase 1 baseline)
+# max_steps is micro-steps (same counter as trainer.global_step).
+SMOKE_PRESETS: Dict[str, dict] = {
+    # --- Phase 1 / 1b smokes (linear LR → 0 is OK; short horizon) ---
     "short": {
         "max_steps": 200,
         "quant_warmup_steps": 100,
@@ -75,8 +78,9 @@ SMOKE_PRESETS = {
         "eval_steps": 100,
         "save_steps": 200,
         "learning_rate": 2e-4,
+        "lr_scheduler_type": "linear",
+        "min_lr_ratio": 0.0,
     },
-    # 640 × 4096 ≈ 2.6M — Phase 1b mid smoke band
     "longer": {
         "max_steps": 640,
         "quant_warmup_steps": 128,
@@ -85,8 +89,10 @@ SMOKE_PRESETS = {
         "eval_steps": 128,
         "save_steps": 320,
         "learning_rate": 2e-4,
+        "lr_scheduler_type": "linear",
+        "min_lr_ratio": 0.0,
     },
-    # 1280 × 4096 ≈ 5.2M — upper end of 1–5M smoke band
+    # 1280 × 4096 ≈ 5.24M — Phase 1b baseline (Kaggle: end PPL ~79.4)
     "full_smoke": {
         "max_steps": 1280,
         "quant_warmup_steps": 256,
@@ -95,12 +101,39 @@ SMOKE_PRESETS = {
         "eval_steps": 256,
         "save_steps": 640,
         "learning_rate": 2e-4,
+        "lr_scheduler_type": "linear",
+        "min_lr_ratio": 0.0,
+    },
+    # --- Phase 1c scale-up (cosine + LR floor; same quant recipe) ---
+    # 6104 × 4096 ≈ 25.00M
+    "scale_25m": {
+        "max_steps": 6104,
+        "quant_warmup_steps": 512,
+        "warmup_steps": 256,
+        "logging_steps": 50,
+        "eval_steps": 512,
+        "save_steps": 1024,
+        "learning_rate": 2e-4,
+        "lr_scheduler_type": "cosine",
+        "min_lr_ratio": 0.1,
+    },
+    # 12207 × 4096 ≈ 50.00M — optional if 25M still falling steeply
+    "scale_50m": {
+        "max_steps": 12207,
+        "quant_warmup_steps": 1024,
+        "warmup_steps": 512,
+        "logging_steps": 50,
+        "eval_steps": 1024,
+        "save_steps": 2048,
+        "learning_rate": 2e-4,
+        "lr_scheduler_type": "cosine",
+        "min_lr_ratio": 0.1,
     },
 }
 
 
 def apply_smoke_preset(config: QAFTConfig, name: str) -> QAFTConfig:
-    """Apply a named smoke preset onto *config* (mutates and returns it)."""
+    """Apply a named run preset onto *config* (mutates and returns it)."""
     if name not in SMOKE_PRESETS:
         raise ValueError(f"Unknown smoke preset {name!r}; choose from {sorted(SMOKE_PRESETS)}")
     for key, val in SMOKE_PRESETS[name].items():

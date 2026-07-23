@@ -23,8 +23,8 @@ Convert a pretrained model to weights on \(\{-1,-c,c,1\}\), then heal so perform
 
 ## Current step
 
-**Phase 1 complete.** **Next: Phase 1b** longer smoke (`--preset longer` ≈ 2.6M tokens).  
-Short-smoke baseline (Kaggle): orig PPL ~17.7 → shock ≫1e6 → ~0.8M tok PPL ~472.  
+**Phase 1 + 1b complete.** **Next: Phase 1c** `--preset scale_25m` (~25M tok).  
+Baselines (Kaggle): orig ~17.7 → shock ≫1e6 → 5.2M PPL ~79.4.  
 See `RESEARCH_PLAN.md` §3 and **[`KAGGLE.md`](KAGGLE.md)**.
 
 ```python
@@ -38,13 +38,13 @@ replace_from_config(model, config)
 ### Kaggle
 
 ```bash
-# Phase 1b longer smoke
-python run_smoke.py --preset longer \
+# Phase 1c scale-up (cosine LR, min_lr_ratio=0.1)
+python run_smoke.py --preset scale_25m \
   --train-data /kaggle/input/.../train.jsonl \
   --val-data /kaggle/input/.../val.jsonl \
   --output-dir /kaggle/working/checkpoints
 
-# Presets: short (~0.8M) | longer (~2.6M) | full_smoke (~5.2M)
+# Presets: short | longer | full_smoke | scale_25m | scale_50m
 # tokens/step = batch × seq × accum (default 1×512×8 = 4096)
 ```
 

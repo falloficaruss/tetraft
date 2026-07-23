@@ -1,95 +1,74 @@
-# TetraFT — Kaggle checklist (Phase 1 / 1b)
+# TetraFT — Kaggle checklist
 
 ## Datasets
 
-| Kaggle Dataset | Contents | How |
-|----------------|----------|-----|
-| **`tetraft-code`** | Flat root `.py` (+ optional `notebooks/`) | Upload zip; refresh when code changes |
-| **`tetraft-fineweb-edu-50m`** | `train.jsonl`, `val.jsonl`, `sample_meta.json` | Build notebook output (below) |
+| Kaggle Dataset | Contents |
+|----------------|----------|
+| **`tetraft-code`** | Flat root `.py` + `notebooks/` |
+| **`tetraft-fineweb-edu-50m`** | `train.jsonl`, `val.jsonl`, `sample_meta.json` |
 
-Do **not** put FineWeb text in git.
-
-### `tetraft-code` upload
-
-```
-config.py
-data.py
-eval.py
-model.py
-quantize.py
-run_smoke.py
-train.py
-notebooks/build_fineweb_sample.ipynb
-notebooks/run_smoke.ipynb
-```
-
-Zip from repo root (no `.venv`, no `data/`, no checkpoints).
+Zip code without `.venv` / `data/` / checkpoints. Refresh `tetraft-code` when modules change.
 
 ---
 
-## A. Build FineWeb-Edu 50M sample ✅
+## A. FineWeb-Edu 50M sample ✅
 
-1. Notebook → **CPU**, **Internet ON**, attach **`tetraft-code`**.
-2. Run `notebooks/build_fineweb_sample.ipynb` (~1–3 h).
-3. Save output → Dataset **`tetraft-fineweb-edu-50m`**.
+CPU, Internet ON → `notebooks/build_fineweb_sample.ipynb` → Dataset `tetraft-fineweb-edu-50m`.
 
 ---
 
-## B. Phase 1 short smoke ✅ (baseline recorded)
+## B. Phase 1 / 1b smokes ✅
 
-Engineering exit **met** on Kaggle (Qwen3.5-0.8B-Base, FineWeb-Edu 50M val):
+| Run | Tokens | Val PPL (end, λ=1) |
+|-----|--------|-------------------:|
+| Original | — | **~17.67** |
+| Shock (0 FT) | 0 | **≫ 1e6** |
+| `short` | ~0.82M | ~472 |
+| `full_smoke` | **~5.24M** | **~79.4** (gap ≈ 4.5× orig) |
 
-| Metric | Approx. value |
-|--------|----------------|
-| Original val PPL | **~17.7** |
-| Shock PPL (λ=1, 0 FT) | **≫ 1e6** (treat as broken, not calibrated) |
-| ~200 steps (~0.8M tok), λ→1 | eval PPL **~472**, loss **finite** |
-| Stack | BF16 + AdamW8bit + grad ckpt, seq 512, batch 1, accum 8 |
+Stack: BF16 + AdamW8bit + grad ckpt, seq 512, batch 1, accum 8.
 
-```bash
-python run_smoke.py --preset short \
-  --train-data .../train.jsonl --val-data .../val.jsonl \
-  --output-dir /kaggle/working/checkpoints
-```
-
-**Installs:** recent `transformers` (needs `qwen3_5`), `accelerate`, `bitsandbytes`.  
 If `KeyError: qwen3_5`:  
 `%pip install -U "git+https://github.com/huggingface/transformers.git"`
 
 ---
 
-## C. Phase 1b — longer smoke (next)
+## C. Phase 1c — scale-up (NEXT)
 
-Same datasets, **GPU**. Goal: recovery curve in the **1–5M token** band; gap still vs **original ~17.7**.
+Same recipe (`c=0.25`, `absmean_channel`, identity STE). **Cosine LR** with **min_lr_ratio=0.1** (no die-to-zero).
 
-Token math: `batch × seq × accum = 1 × 512 × 8 = 4096` tokens/step.
+Token math: `1 × 512 × 8 = 4096` tokens/micro-step.
 
-| Preset | `max_steps` | ≈ tokens | λ warmup | LR warmup |
-|--------|------------:|---------:|---------:|----------:|
-| `longer` | 640 | ~2.6M | 128 | 64 |
-| `full_smoke` | 1280 | ~5.2M | 256 | 128 |
+| Preset | Steps | ≈ tokens | λ warmup | LR warmup | Wall (rough) |
+|--------|------:|---------:|---------:|----------:|--------------|
+| **`scale_25m`** | 6104 | **~25.0M** | 512 | 256 | ~4–5× full_smoke (~3–4 h if full_smoke ~50 min) |
+| `scale_50m` | 12207 | ~50.0M | 1024 | 512 | ~2× scale_25m |
 
 ```bash
-# Recommended next run
-python run_smoke.py --preset longer \
+python run_smoke.py --preset scale_25m \
   --train-data /kaggle/input/.../train.jsonl \
   --val-data /kaggle/input/.../val.jsonl \
   --output-dir /kaggle/working/checkpoints
-
-# Or upper smoke band
-python run_smoke.py --preset full_smoke ...
 ```
 
-Notebook: set `PRESET = "longer"` in `notebooks/run_smoke.ipynb`.
+Notebook: `PRESET = "scale_25m"` in `notebooks/run_smoke.ipynb`.
 
-**Watch in `smoke_results.json`:**
-- `ppl_original`, `ppl_shock`, `ppl_after_smoke`
-- `tokens_seen`, `steps_ran`, `loss_finite`
-- `train_metrics.perplexity` vs steps (should trend down after λ=1)
+**Watch**
+- `ppl_after_smoke` vs **79.4**
+- `train_metrics.perplexity` after λ=1 (step ≥ 512)
+- end LR ≈ `0.1 * 2e-4` (not 0)
+- `after/orig` (target → 1.0)
 
-**Success (1b):** finite loss; post-smoke PPL **&lt; ~472** and still falling; no requirement to hit 17.7 yet.
+**Success (1c):** PPL **&lt; 79**, finite loss.  
+**Gate → Phase 2:** still falling at 25M → optional `scale_50m` **or** start ablations; plateau ≫ 17.7 → ablations sooner.
 
-**Wall time (rough):** short was ~8–15 min train; `longer` ~3× (~30–45 min); `full_smoke` ~6× (~1–1.5 h). Depends on GPU.
+---
+
+## D. Phase 2 — recipe search (after 1c)
+
+Fixed data order; one factor at a time vs control (= 1c recipe).  
+Scout ~10M tok; confirm winners longer. Factors: `c`, scale, λ schedule, STE, module scope (GDN).  
+Harness TBD after `scale_25m` results.
 
 ---
 
@@ -97,9 +76,8 @@ Notebook: set `PRESET = "longer"` in `notebooks/run_smoke.ipynb`.
 
 | Step | Internet |
 |------|----------|
-| Build FineWeb sample | ON |
-| First model download / transformers upgrade | ON |
-| Reproducible train after cache | OFF preferred |
+| Build FineWeb / first model download | ON |
+| Train after cache | OFF preferred |
 
 ---
 
@@ -107,6 +85,8 @@ Notebook: set `PRESET = "longer"` in `notebooks/run_smoke.ipynb`.
 
 | Phase | Status |
 |-------|--------|
-| **1** short smoke + data + memory recipe | **COMPLETE** |
-| **1b** longer smoke 1–5M tokens | **NEXT** |
-| **2** recipe ablations on fixed 50M | after 1b curve |
+| 1 short smoke + data + memory | **COMPLETE** |
+| 1b 1–5M smoke | **COMPLETE** (5.2M → PPL ~79) |
+| **1c scale_25m** | **NEXT** |
+| 2 ablations | after 1c |
+| 3 main 100–200M | after recipe freeze |

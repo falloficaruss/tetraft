@@ -10,12 +10,12 @@ Instructions for coding agents working in this repository.
 |-----|----------|
 | `RESEARCH.md` | Math & method (must match code) |
 | `PLAN.md` | Models, FineWeb-Edu data, VRAM, Kaggle |
-| `RESEARCH_PLAN.md` | Phases; **Phase 1b next** |
+| `RESEARCH_PLAN.md` | Phases; **Phase 1c next** (`scale_25m`) |
 
 ## Current focus
 
-**Phase 1 complete** (short smoke on Kaggle). **Next: Phase 1b** — `--preset longer` / `full_smoke` (1–5M tokens).  
-Baseline: orig PPL ~17.7, shock ≫1e6, ~0.8M tok → ~472. See `KAGGLE.md`.  
+**Phase 1 + 1b complete.** **Next: Phase 1c** — `--preset scale_25m` (~25M tok, cosine LR + 0.1 floor).  
+Baselines: orig ~17.7, shock ≫1e6, 5.2M → ~79.4. Then Phase 2 ablations. See `KAGGLE.md`.  
 Do not prioritize BitNet baselines, full 2B runs, or notebook rewrites unless asked.
 
 ## Entry pattern

@@ -1,8 +1,11 @@
 import logging
+import math
 import os
+from functools import partial
 
 import torch
 from torch.optim import AdamW
+from torch.optim.lr_scheduler import LambdaLR
 from transformers import get_linear_schedule_with_warmup
 
 from eval import evaluate_perplexity, model_device
@@ -50,6 +53,80 @@ def _build_optimizer(model, config):
     return AdamW(optimizer_grouped_parameters, lr=config.learning_rate)
 
 
+def _optimizer_schedule_steps(config):
+    """Convert micro-step budgets to optimizer-step counts (scheduler.step units).
+
+    Trainer calls ``scheduler.step()`` once per optimizer step, i.e. every
+    ``gradient_accumulation_steps`` micro-steps. ``max_steps`` / ``warmup_steps``
+    in config are micro-steps (same as ``global_step``).
+    """
+    accum = max(1, config.gradient_accumulation_steps)
+    num_training_steps = max(1, config.max_steps // accum)
+    num_warmup_steps = min(
+        max(0, config.warmup_steps // accum),
+        max(0, num_training_steps - 1),
+    )
+    return num_warmup_steps, num_training_steps
+
+
+def _cosine_with_min_lr_lambda(
+    current_step: int,
+    *,
+    num_warmup_steps: int,
+    num_training_steps: int,
+    min_lr_ratio: float,
+) -> float:
+    """Warmup → cosine decay down to ``min_lr_ratio`` (not necessarily 0)."""
+    if current_step < num_warmup_steps:
+        return float(current_step) / float(max(1, num_warmup_steps))
+    if current_step >= num_training_steps:
+        return float(min_lr_ratio)
+    progress = float(current_step - num_warmup_steps) / float(
+        max(1, num_training_steps - num_warmup_steps)
+    )
+    cosine = 0.5 * (1.0 + math.cos(math.pi * progress))
+    return float(min_lr_ratio + (1.0 - min_lr_ratio) * cosine)
+
+
+def _build_scheduler(optimizer, config):
+    """Linear (→0) or cosine (→ min_lr_ratio * base_lr) schedule over optimizer steps."""
+    num_warmup_steps, num_training_steps = _optimizer_schedule_steps(config)
+    sched_type = getattr(config, "lr_scheduler_type", "linear") or "linear"
+    min_lr_ratio = float(getattr(config, "min_lr_ratio", 0.0) or 0.0)
+    min_lr_ratio = min(max(min_lr_ratio, 0.0), 1.0)
+
+    if sched_type == "cosine":
+        lr_lambda = partial(
+            _cosine_with_min_lr_lambda,
+            num_warmup_steps=num_warmup_steps,
+            num_training_steps=num_training_steps,
+            min_lr_ratio=min_lr_ratio,
+        )
+        sched = LambdaLR(optimizer, lr_lambda)
+        logger.info(
+            "LR schedule=cosine warmup_opt_steps=%d total_opt_steps=%d min_lr_ratio=%.3f",
+            num_warmup_steps,
+            num_training_steps,
+            min_lr_ratio,
+        )
+        return sched
+
+    if sched_type != "linear":
+        logger.warning("Unknown lr_scheduler_type=%r; using linear", sched_type)
+
+    sched = get_linear_schedule_with_warmup(
+        optimizer,
+        num_warmup_steps=num_warmup_steps,
+        num_training_steps=num_training_steps,
+    )
+    logger.info(
+        "LR schedule=linear warmup_opt_steps=%d total_opt_steps=%d",
+        num_warmup_steps,
+        num_training_steps,
+    )
+    return sched
+
+
 def _autocast_dtype(config, device: torch.device):
     """Return autocast dtype or ``None`` if autocast should be disabled."""
     if device.type != "cuda":
@@ -78,19 +155,7 @@ class QAFTTrainer:
                 self.model.config.use_cache = False
 
         self.optimizer = _build_optimizer(self.model, config)
-
-        # Avoid zero warmup/training steps when max_steps < accum.
-        accum = max(1, config.gradient_accumulation_steps)
-        num_training_steps = max(1, config.max_steps // accum)
-        num_warmup_steps = min(
-            max(0, config.warmup_steps // accum),
-            max(0, num_training_steps - 1),
-        )
-        self.scheduler = get_linear_schedule_with_warmup(
-            self.optimizer,
-            num_warmup_steps=num_warmup_steps,
-            num_training_steps=num_training_steps,
-        )
+        self.scheduler = _build_scheduler(self.optimizer, config)
 
         self.global_step = 0
         self.total_loss = 0.0

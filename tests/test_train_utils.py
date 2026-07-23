@@ -7,7 +7,13 @@ from config import QAFTConfig, SMOKE_PRESETS, apply_smoke_preset
 from eval import evaluate_perplexity, model_device
 from model import dump_linear_inventory, replace_from_config, set_quant_lambda
 from quantize import QuantizedLinear
-from train import _autocast_dtype, _build_optimizer
+from train import (
+    _autocast_dtype,
+    _build_optimizer,
+    _build_scheduler,
+    _cosine_with_min_lr_lambda,
+    _optimizer_schedule_steps,
+)
 
 
 class _TinyLM(nn.Module):
@@ -107,7 +113,9 @@ class TestEvaluatePerplexity:
 
 class TestSmokePresets:
     def test_preset_names(self):
-        assert set(SMOKE_PRESETS) >= {"short", "longer", "full_smoke"}
+        assert set(SMOKE_PRESETS) >= {
+            "short", "longer", "full_smoke", "scale_25m", "scale_50m",
+        }
 
     def test_apply_longer_preset(self):
         cfg = QAFTConfig()
@@ -117,8 +125,57 @@ class TestSmokePresets:
         assert cfg.warmup_steps == 64
         assert cfg.tokens_budget() == 640 * 1 * 512 * 8  # ≈ 2.6M
 
+    def test_scale_25m_preset(self):
+        cfg = apply_smoke_preset(QAFTConfig(), "scale_25m")
+        assert cfg.max_steps == 6104
+        assert cfg.tokens_budget() == 6104 * 4096  # ≈ 25.0M
+        assert cfg.lr_scheduler_type == "cosine"
+        assert cfg.min_lr_ratio == 0.1
+
     def test_unknown_preset_raises(self):
         import pytest
 
         with pytest.raises(ValueError, match="Unknown smoke preset"):
             apply_smoke_preset(QAFTConfig(), "nope")
+
+
+class TestScheduler:
+    def test_optimizer_schedule_steps_divides_by_accum(self):
+        cfg = QAFTConfig(max_steps=1280, warmup_steps=128, gradient_accumulation_steps=8)
+        warm, total = _optimizer_schedule_steps(cfg)
+        assert total == 160
+        assert warm == 16
+
+    def test_cosine_ends_at_min_ratio(self):
+        v0 = _cosine_with_min_lr_lambda(
+            0, num_warmup_steps=10, num_training_steps=100, min_lr_ratio=0.1
+        )
+        assert v0 == 0.0
+        vend = _cosine_with_min_lr_lambda(
+            100, num_warmup_steps=10, num_training_steps=100, min_lr_ratio=0.1
+        )
+        assert abs(vend - 0.1) < 1e-6
+        vmid = _cosine_with_min_lr_lambda(
+            55, num_warmup_steps=10, num_training_steps=100, min_lr_ratio=0.1
+        )
+        assert 0.1 < vmid < 1.0
+
+    def test_build_cosine_scheduler(self):
+        model = nn.Linear(4, 4)
+        cfg = QAFTConfig(
+            use_8bit_adam=False,
+            max_steps=80,
+            warmup_steps=16,
+            gradient_accumulation_steps=8,
+            lr_scheduler_type="cosine",
+            min_lr_ratio=0.1,
+            learning_rate=1e-3,
+        )
+        opt = _build_optimizer(model, cfg)
+        sched = _build_scheduler(opt, cfg)
+        # 10 optimizer steps total; step through and check final lr ≈ 1e-4
+        for _ in range(10):
+            opt.step()
+            sched.step()
+        lr = sched.get_last_lr()[0]
+        assert abs(lr - 1e-4) < 1e-6
