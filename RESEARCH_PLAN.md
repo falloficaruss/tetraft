@@ -122,12 +122,12 @@ Long runs: **cosine + min_lr_ratio=0.1** (presets `heal_25m` / `heal_50m`).
 | Priority | Factor | Status |
 |----------|--------|--------|
 | P0 | **scope** (all Linear vs exclude GDN) | ✅ scout @ 5.2M: skip GDN **~60.6** vs all-Linear **~79.4** |
-| P0 | **length** with heal DNA | **NEXT** — `heal_25m` then optional `heal_50m` |
+| P0 | **length** with heal DNA | ✅ `heal_25m` → **~48.2 @ 25M**; **NEXT `heal_50m`** |
 | P0 | **\(c\)** 0.25 vs 0.5 | Deferred (keep **0.25**) |
 | P0 | **scale_mode** | Deferred |
-| P1 | λ / STE / LR shape | Long-run cosine+floor in heal presets |
-| P2 | KL to original | if CE stalls after length |
-| tokens | scout done; scale 25–50M; main 100–200M after freeze |
+| P1 | λ / STE / LR shape | cosine+floor in heal presets |
+| P2 | KL to original | if CE stalls after 50M |
+| tokens | 25M done; 50M next; main 100–200M after freeze |
 
 Details: **`RESULTS.md`**.
 
@@ -217,12 +217,12 @@ Details: **`RESULTS.md`**.
 
 ## 8. Immediate next step
 
-### → **`heal_25m` length scale** (see `RESULTS.md`)
+### → **`heal_50m` from scratch** (see `RESULTS.md`)
 
 1. Recipe locked: skip GDN, λw=256, c=0.25, cosine+0.1 floor, disk-safe  
-2. Kaggle: `--preset heal_25m` (notebook defaults to this)  
-3. Goal: drive val PPL below ~60.6 toward original ~17.7  
-4. If still improving hard near 25M → `heal_50m`; else consider Phase 3 / other factors  
-5. Deprioritize: c=0.5, old scale_25m DNA, BitNet, 2B  
+2. Kaggle: `--preset heal_50m` — **fresh** run (heal_25m ckpt is weights-only; not seamless resume)  
+3. Goal: beat **~48.2** / after/orig **~2.73**; trend toward orig ~17.7  
+4. If still falling hard near 50M → longer main; if plateau far from orig → other factors  
+5. Deprioritize: c=0.5, old scale DNA, BitNet, 2B  
 
 Details: `RESULTS.md`, `KAGGLE.md`.

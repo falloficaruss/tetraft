@@ -16,10 +16,10 @@ Instructions for coding agents working in this repository.
 
 ## Current focus
 
-**Phase 2 scope done at 5.2M.** Read **`RESULTS.md`** before changing train recipe.  
-Baselines: orig ~17.7; full_smoke all-Linear 5.2M→~79; **full_smoke+skip_linear_attn →~60.6**; old scale_25m ~21M→~69.  
-**Next:** scale with **heal DNA** — `heal_25m` / `heal_50m` (λw=256, skip GDN, cosine+0.1, **c=0.25**).  
-Do not prioritize c=0.5, BitNet, old scale_25m knobs, 2B, or SFT unless asked.
+**Read `RESULTS.md` before changing train recipe.**  
+Best: **`heal_25m` → ~48.2 @ 25M** (after/orig ~2.73); scout skip-GDN ~60.6 @ 5.2M; orig ~17.7.  
+**Next:** **`heal_50m` from scratch** (λw=256, skip GDN, cosine+0.1, c=0.25). No weights-only resume as primary.  
+Do not prioritize c=0.5, BitNet, old scale_25m, 2B, or SFT unless asked.
 
 ## Entry pattern
 

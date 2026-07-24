@@ -27,9 +27,10 @@ CPU, Internet ON → `notebooks/build_fineweb_sample.ipynb` → Dataset `tetraft
 | Shock (all Linear) | 0 | ≫1e6 | λ=1, zero FT |
 | Shock (skip GDN) | 0 | ~1.78e4 | milder |
 | `short` | ~0.8M | ~472 | pipeline |
-| `full_smoke` | 5.2M | **~79.4** | all Linear, λw=256 |
-| **`full_smoke` + skip_linear_attn** | **5.2M** | **~60.6** | **scope win; after/orig ~3.43** |
-| `scale_25m` (partial) | ~21M | ~68.6 | old DNA; disk stop; not default |
+| `full_smoke` | 5.2M | ~79.4 | all Linear |
+| `full_smoke` + skip GDN | 5.2M | ~60.6 | scope win |
+| **`heal_25m`** | **25.0M** | **~48.2** | **best so far; after/orig ~2.73** |
+| `scale_25m` (partial) | ~21M | ~68.6 | old DNA; not default |
 
 Stack: BF16 + AdamW8bit + grad ckpt, seq 512, batch 1, accum 8 → **4096 tok/step**.
 
@@ -54,30 +55,30 @@ If `KeyError: qwen3_5`:
 
 ---
 
-## D. What to run next — heal scale-up
+## D. What to run next — `heal_50m`
 
 **Locked recipe (c stays 0.25):**
 - `skip_linear_attn=True` (GDN FP)
 - λ_warmup=**256**, peak lr 2e-4
-- Long run: **cosine + min_lr_ratio=0.1** (not full-horizon linear→0)
-- Disk-safe checkpoints
+- Long run: **cosine + min_lr_ratio=0.1**
+- Disk-safe checkpoints (weights-only)
 
-| Preset | ≈ tokens | Use |
-|--------|---------:|-----|
-| `full_smoke_no_gdn` | 5.2M | short re-check |
-| **`heal_25m`** | **25M** | **primary next** |
-| `heal_50m` | 50M | if 25M still falling fast |
+| Preset | ≈ tokens | Status |
+|--------|---------:|--------|
+| `full_smoke_no_gdn` | 5.2M | done ~60.6 |
+| `heal_25m` | 25M | **done ~48.2** |
+| **`heal_50m`** | **50M** | **next — fresh start** (no resume from weights-only 25M) |
 
 ```bash
-python run_smoke.py --preset heal_25m \
+python run_smoke.py --preset heal_50m \
   --train-data /kaggle/input/.../train.jsonl \
   --val-data /kaggle/input/.../val.jsonl \
-  --output-dir /kaggle/working/checkpoints_heal_25m
+  --output-dir /kaggle/working/checkpoints_heal_50m
 ```
 
-Notebook: `notebooks/run_smoke.ipynb` defaults to `heal_25m`.
+Notebook: set `PRESET = "heal_50m"`.
 
-**Not recommended:** old `scale_25m` / `scale_50m` (λw=512, all-Linear).
+**Not recommended:** resume heal_25m weights-only as primary 50M; old `scale_25m`/`scale_50m`.
 
 ---
 
@@ -95,7 +96,8 @@ Notebook: `notebooks/run_smoke.ipynb` defaults to `heal_25m`.
 | Phase | Status |
 |-------|--------|
 | 1 + 1b smoke | **COMPLETE** (5.2M → ~79 all-Linear) |
-| 1c scale_25m | **PARTIAL** (recorded; obsolete DNA) |
-| 2 scope | **COMPLETE** @ 5.2M (skip GDN → ~60.6) |
-| **Next** | **`heal_25m`** length scale toward original |
-| 3 main 100–200M | after heal signal / recipe freeze |
+| 1c scale_25m | **PARTIAL** (obsolete DNA) |
+| 2 scope | **COMPLETE** (skip GDN → ~60.6 @ 5.2M) |
+| 2 length `heal_25m` | **COMPLETE** (**~48.2 @ 25M**, after/orig ~2.73) |
+| **Next** | **`heal_50m` from scratch** |
+| 3 main 100–200M | after 50M signal / recipe freeze |
