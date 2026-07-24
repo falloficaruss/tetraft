@@ -16,10 +16,10 @@ Instructions for coding agents working in this repository.
 
 ## Current focus
 
-**Phase 1+1b done; 1c partial (recorded).** Read **`RESULTS.md`** before changing train recipe.  
-Baselines: orig ~17.7; full_smoke 5.2M→~79; scale_25m ~21M→~69 (less efficient early).  
-**Next (architecture):** disk-safe ckpts → Phase 2 ablations (scope/GDN, \(c\), scale) with **full_smoke DNA** (λw≈256).  
-Do not prioritize BitNet, blind scale_50m, 2B, or notebook rewrites unless asked.
+**Phase 2 scope done at 5.2M.** Read **`RESULTS.md`** before changing train recipe.  
+Baselines: orig ~17.7; full_smoke all-Linear 5.2M→~79; **full_smoke+skip_linear_attn →~60.6**; old scale_25m ~21M→~69.  
+**Next:** scale with **heal DNA** — `heal_25m` / `heal_50m` (λw=256, skip GDN, cosine+0.1, **c=0.25**).  
+Do not prioritize c=0.5, BitNet, old scale_25m knobs, 2B, or SFT unless asked.
 
 ## Entry pattern
 

@@ -118,7 +118,14 @@ class TestEvaluatePerplexity:
 class TestSmokePresets:
     def test_preset_names(self):
         assert set(SMOKE_PRESETS) >= {
-            "short", "longer", "full_smoke", "scale_25m", "scale_50m",
+            "short",
+            "longer",
+            "full_smoke",
+            "full_smoke_no_gdn",
+            "heal_25m",
+            "heal_50m",
+            "scale_25m",
+            "scale_50m",
         }
 
     def test_apply_longer_preset(self):
@@ -135,6 +142,25 @@ class TestSmokePresets:
         assert cfg.tokens_budget() == 6104 * 4096  # ≈ 25.0M
         assert cfg.lr_scheduler_type == "cosine"
         assert cfg.min_lr_ratio == 0.1
+        assert cfg.skip_linear_attn is False
+
+    def test_heal_25m_preset(self):
+        cfg = apply_smoke_preset(QAFTConfig(), "heal_25m")
+        assert cfg.max_steps == 6104
+        assert cfg.tokens_budget() == 6104 * 4096
+        assert cfg.quant_warmup_steps == 256
+        assert cfg.warmup_steps == 128
+        assert cfg.lr_scheduler_type == "cosine"
+        assert cfg.min_lr_ratio == 0.1
+        assert cfg.skip_linear_attn is True
+        assert cfg.quaternary_c == 0.25
+        assert cfg.save_steps == 0
+
+    def test_full_smoke_no_gdn_preset(self):
+        cfg = apply_smoke_preset(QAFTConfig(), "full_smoke_no_gdn")
+        assert cfg.max_steps == 1280
+        assert cfg.skip_linear_attn is True
+        assert cfg.lr_scheduler_type == "linear"
 
     def test_unknown_preset_raises(self):
         import pytest

@@ -97,7 +97,13 @@ def _parse_args(argv=None):
     p.add_argument(
         "--skip-linear-attn",
         action="store_true",
-        help="Phase 2 scope: do not quantize GDN modules under path 'linear_attn'.",
+        default=None,
+        help="Do not quantize GDN path 'linear_attn' (overrides preset if set).",
+    )
+    p.add_argument(
+        "--no-skip-linear-attn",
+        action="store_true",
+        help="Force quantize GDN (override heal presets that skip linear_attn).",
     )
     p.add_argument("--seed", type=int, default=None)
     p.add_argument("--device-map", type=str, default="auto", help="HF device_map (auto|cpu|cuda)")
@@ -144,7 +150,10 @@ def _apply_cli_overrides(config: QAFTConfig, args) -> QAFTConfig:
         config.save_steps = args.save_steps
     if getattr(args, "save_optimizer", False):
         config.save_optimizer = True
-    if getattr(args, "skip_linear_attn", False):
+    # Scope: preset may set skip_linear_attn; CLI can force on/off
+    if getattr(args, "no_skip_linear_attn", False):
+        config.skip_linear_attn = False
+    elif getattr(args, "skip_linear_attn", None) is True:
         config.skip_linear_attn = True
     if args.seed is not None:
         config.seed = args.seed
@@ -235,7 +244,8 @@ def run_smoke(args=None) -> Dict[str, Any]:
         ("eval_steps", None),
         ("save_steps", None),
         ("save_optimizer", False),
-        ("skip_linear_attn", False),
+        ("skip_linear_attn", None),
+        ("no_skip_linear_attn", False),
     ):
         if not hasattr(ns, field):
             setattr(ns, field, default)
@@ -327,7 +337,8 @@ def run_smoke(args=None) -> Dict[str, Any]:
         logger.info(
             "Starting QAFT: max_steps=%d, tokens_budget≈%s, seq=%d, batch=%d, "
             "accum=%d, λ_warmup=%d, lr_warmup=%d, lr_sched=%s, min_lr_ratio=%.3f, "
-            "bf16=%s, 8bit_adam=%s, save_steps=%d, save_optimizer=%s",
+            "bf16=%s, 8bit_adam=%s, save_steps=%d, save_optimizer=%s, "
+            "skip_linear_attn=%s, c=%.3f, scale_mode=%s",
             config.max_steps,
             f"{tokens_budget:,}",
             config.seq_length,
@@ -341,6 +352,9 @@ def run_smoke(args=None) -> Dict[str, Any]:
             config.use_8bit_adam,
             config.save_steps,
             config.save_optimizer,
+            config.skip_linear_attn,
+            config.quaternary_c,
+            config.scale_mode,
         )
         trainer = QAFTTrainer(model, tokenizer, config)
         trainer.train(train_loader, eval_dataloader=val_loader)

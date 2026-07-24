@@ -113,24 +113,23 @@ Full numbers, curves, and lessons: **`RESULTS.md`**.
 
 ---
 
-### Phase 2 — Recipe + schedule architecture  ← **NEXT**
+### Phase 2 — Recipe + schedule architecture  ← **IN PROGRESS**
 
 Fixed data order; optimize **gap to original**.  
-**Control DNA:** full_smoke quant + **λ_warmup≈256** (not scale_25m’s λw=512).  
-Scout budget ~**5–10M** tokens per factor; disk-safe checkpoints required before long jobs.
+**Heal DNA:** λ_warmup≈**256**, peak lr 2e-4, **\(c=0.25\)**, absmean_channel, **`skip_linear_attn=True`**, disk-safe ckpts.  
+Long runs: **cosine + min_lr_ratio=0.1** (presets `heal_25m` / `heal_50m`).
 
-| Priority | Factor | Levels / notes |
-|----------|--------|----------------|
-| P0 | **scope** | all eligible Linear vs **exclude GDN / linear-attn** |
-| P0 | **\(c\)** | 0.25, 0.5 |
-| P0 | **scale** | absmean_channel, absmean_tensor, absmax_* |
-| P1 | λ / STE / LR shape | hard vs linear λ; identity vs clip; long-run LR ≠ blind linear→0 over full horizon |
-| P2 | KL to original | if CE stalls |
-| tokens | scout ~5–10M; confirm longer; main 100–200M after freeze |
+| Priority | Factor | Status |
+|----------|--------|--------|
+| P0 | **scope** (all Linear vs exclude GDN) | ✅ scout @ 5.2M: skip GDN **~60.6** vs all-Linear **~79.4** |
+| P0 | **length** with heal DNA | **NEXT** — `heal_25m` then optional `heal_50m` |
+| P0 | **\(c\)** 0.25 vs 0.5 | Deferred (keep **0.25**) |
+| P0 | **scale_mode** | Deferred |
+| P1 | λ / STE / LR shape | Long-run cosine+floor in heal presets |
+| P2 | KL to original | if CE stalls after length |
+| tokens | scout done; scale 25–50M; main 100–200M after freeze |
 
-Optional later: full_smoke knobs × 25M as a **single** length ablation (not bundled with λw=512).
-
-Details: **`RESULTS.md`** §5.
+Details: **`RESULTS.md`**.
 
 ---
 
@@ -218,12 +217,12 @@ Details: **`RESULTS.md`** §5.
 
 ## 8. Immediate next step
 
-### → **Phase 2 architecture** (see `RESULTS.md`)
+### → **`heal_25m` length scale** (see `RESULTS.md`)
 
-1. Read **`RESULTS.md`** — frozen PPL baselines and lessons  
-2. Before long Kaggle runs: **disk-safe checkpoints** (weights-only best/final)  
-3. Control = **full_smoke DNA** (λ_warmup≈256); scout ablations @ ~5–10M: **scope (GDN), \(c\), scale**  
-4. Long-run LR: do not assume full-horizon linear→0; anneal/floor as explicit factor  
-5. Deprioritize blind `scale_25m`/`scale_50m` reruns and BitNet baselines  
+1. Recipe locked: skip GDN, λw=256, c=0.25, cosine+0.1 floor, disk-safe  
+2. Kaggle: `--preset heal_25m` (notebook defaults to this)  
+3. Goal: drive val PPL below ~60.6 toward original ~17.7  
+4. If still improving hard near 25M → `heal_50m`; else consider Phase 3 / other factors  
+5. Deprioritize: c=0.5, old scale_25m DNA, BitNet, 2B  
 
-Details: `RESULTS.md` §5, `KAGGLE.md`.
+Details: `RESULTS.md`, `KAGGLE.md`.

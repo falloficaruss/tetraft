@@ -97,7 +97,7 @@ SMOKE_PRESETS: Dict[str, dict] = {
         "lr_scheduler_type": "linear",
         "min_lr_ratio": 0.0,
     },
-    # 1280 × 4096 ≈ 5.24M — Phase 1b baseline (Kaggle: end PPL ~79.4)
+    # 1280 × 4096 ≈ 5.24M — Phase 1b baseline (Kaggle: end PPL ~79.4 all-Linear)
     "full_smoke": {
         "max_steps": 1280,
         "quant_warmup_steps": 256,
@@ -108,8 +108,52 @@ SMOKE_PRESETS: Dict[str, dict] = {
         "learning_rate": 2e-4,
         "lr_scheduler_type": "linear",
         "min_lr_ratio": 0.0,
+        "skip_linear_attn": False,
     },
-    # --- Phase 1c scale-up (cosine + LR floor; same quant recipe) ---
+    # Scope scout: same as full_smoke + GDN FP (Kaggle: end PPL ~60.6)
+    "full_smoke_no_gdn": {
+        "max_steps": 1280,
+        "quant_warmup_steps": 256,
+        "warmup_steps": 128,
+        "logging_steps": 40,
+        "eval_steps": 256,
+        "save_steps": 0,
+        "learning_rate": 2e-4,
+        "lr_scheduler_type": "linear",
+        "min_lr_ratio": 0.0,
+        "skip_linear_attn": True,
+    },
+    # --- Phase 2 heal scale-up (full_smoke DNA + skip GDN + cosine floor) ---
+    # Do NOT use old scale_25m (λw=512, all-Linear) as mainline.
+    # 6104 × 4096 ≈ 25.00M
+    "heal_25m": {
+        "max_steps": 6104,
+        "quant_warmup_steps": 256,
+        "warmup_steps": 128,
+        "logging_steps": 50,
+        "eval_steps": 512,
+        "save_steps": 0,
+        "learning_rate": 2e-4,
+        "lr_scheduler_type": "cosine",
+        "min_lr_ratio": 0.1,
+        "skip_linear_attn": True,
+        "quaternary_c": 0.25,
+    },
+    # 12207 × 4096 ≈ 50.00M — if heal_25m still falling steeply near end
+    "heal_50m": {
+        "max_steps": 12207,
+        "quant_warmup_steps": 256,
+        "warmup_steps": 128,
+        "logging_steps": 50,
+        "eval_steps": 1024,
+        "save_steps": 0,
+        "learning_rate": 2e-4,
+        "lr_scheduler_type": "cosine",
+        "min_lr_ratio": 0.1,
+        "skip_linear_attn": True,
+        "quaternary_c": 0.25,
+    },
+    # --- Historical only (worse early DNA; do not default) ---
     # 6104 × 4096 ≈ 25.00M
     "scale_25m": {
         "max_steps": 6104,
@@ -121,8 +165,9 @@ SMOKE_PRESETS: Dict[str, dict] = {
         "learning_rate": 2e-4,
         "lr_scheduler_type": "cosine",
         "min_lr_ratio": 0.1,
+        "skip_linear_attn": False,
     },
-    # 12207 × 4096 ≈ 50.00M — optional if 25M still falling steeply
+    # 12207 × 4096 ≈ 50.00M
     "scale_50m": {
         "max_steps": 12207,
         "quant_warmup_steps": 1024,
@@ -133,6 +178,7 @@ SMOKE_PRESETS: Dict[str, dict] = {
         "learning_rate": 2e-4,
         "lr_scheduler_type": "cosine",
         "min_lr_ratio": 0.1,
+        "skip_linear_attn": False,
     },
 }
 

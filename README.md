@@ -25,15 +25,16 @@ Convert a pretrained model to weights on \(\{-1,-c,c,1\}\), then heal so perform
 
 ## Current step
 
-Phase 1+1b complete; 1c partial. **Read [`RESULTS.md`](RESULTS.md).**  
+Phase 2 scope done. **Read [`RESULTS.md`](RESULTS.md).**  
 
 | Milestone | Val PPL |
 |-----------|--------:|
 | Original | ~17.7 |
-| full_smoke ~5.2M | ~79 |
-| scale_25m ~21M (disk stop) | ~69 |
+| full_smoke (all Linear) ~5.2M | ~79 |
+| **full_smoke + skip GDN ~5.2M** | **~60.6** |
+| scale_25m ~21M (old DNA) | ~69 |
 
-**Next:** disk-safe training + Phase 2 recipe search (control = full_smoke DNA). Not blind scale_50m.
+**Next:** `heal_25m` length scale (skip GDN, λw=256, c=0.25, cosine+0.1). Not c=0.5 / old scale_25m.
 
 ```python
 from config import QAFTConfig
