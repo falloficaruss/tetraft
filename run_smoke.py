@@ -265,6 +265,9 @@ def run_smoke(args=None) -> Dict[str, Any]:
         ("save_optimizer", False),
         ("skip_linear_attn", None),
         ("no_skip_linear_attn", False),
+        ("distill_alpha", None),
+        ("distill_temperature", None),
+        ("quant_reg_beta", None),
     ):
         if not hasattr(ns, field):
             setattr(ns, field, default)
