@@ -398,16 +398,24 @@ class QAFTTrainer:
                 t_kwargs["attention_mask"] = batch["attention_mask"]
             with torch.no_grad():
                 t_out = self.teacher(**t_kwargs)
+            t_logits = t_out.logits
+            if t_logits.device != outputs.logits.device:
+                t_logits = t_logits.to(outputs.logits.device)
             kl = distillation_kl_loss(
-                outputs.logits, t_out.logits, batch["labels"], temperature=temperature
+                outputs.logits, t_logits, batch["labels"], temperature=temperature
             )
+            if kl.device != ce.device:
+                kl = kl.to(ce.device)
             loss = alpha * ce + (1.0 - alpha) * kl
         else:
             kl = ce * 0.0
             loss = ce
 
         if beta > 0.0:
-            reg = quant_commitment_loss(self.model)
+            reg = quant_commitment_loss(self.model, device=ce.device)
+            # CE may live on a different shard than reduce device under device_map.
+            if reg.device != loss.device:
+                reg = reg.to(loss.device)
             loss = loss + beta * reg
         else:
             reg = ce * 0.0

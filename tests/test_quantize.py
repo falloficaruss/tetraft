@@ -317,3 +317,25 @@ class TestCommitmentAndBins:
         assert stats["n"] == 32 * 16
         s = sum(stats["frac"].values())
         assert abs(s - 1.0) < 1e-5
+
+    def test_commitment_loss_multi_device_reduce(self):
+        """Layer errs on different devices must reduce without RuntimeError."""
+        from quantize import quant_commitment_loss
+
+        if not torch.cuda.is_available() or torch.cuda.device_count() < 2:
+            pytest.skip("needs >=2 CUDA devices")
+
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = QuantizedLinear(8, 4, bias=False, c=0.25).to("cuda:0")
+                self.b = QuantizedLinear(8, 4, bias=False, c=0.25).to("cuda:1")
+
+        model = M()
+        loss = quant_commitment_loss(model, device="cuda:0")
+        assert loss.device.type == "cuda"
+        assert loss.device.index == 0
+        assert torch.isfinite(loss)
+        loss.backward()
+        assert model.a.weight.grad is not None
+        assert model.b.weight.grad is not None

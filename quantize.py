@@ -130,14 +130,19 @@ class QuantizedLinear(nn.Module):
         )
 
 
-def quant_commitment_loss(model: nn.Module) -> torch.Tensor:
+def quant_commitment_loss(
+    model: nn.Module,
+    device: torch.device | str | None = None,
+) -> torch.Tensor:
     """Mean squared commitment ``||W - sg(Q(W))||^2`` over all ``QuantizedLinear`` weights.
 
     Pulls latent weights toward the discrete grid so the STE path is less dishonest.
-    Returns a scalar on the model's device (0 if no quantized layers).
+    Returns a scalar on *device* (or the first layer's device). Layer errs are moved
+    onto that device before summing so ``device_map`` multi-GPU shards do not crash.
     """
     total = None
     n = 0
+    reduce_device = torch.device(device) if device is not None else None
     for module in model.modules():
         if not isinstance(module, QuantizedLinear):
             continue
@@ -145,13 +150,18 @@ def quant_commitment_loss(model: nn.Module) -> torch.Tensor:
         gamma = compute_scale(w, module.scale_mode)
         w_q = quaternary_quant(w, module.c, gamma)
         err = (w - w_q.detach()).pow(2).mean()
+        if reduce_device is None:
+            reduce_device = err.device
+        elif err.device != reduce_device:
+            err = err.to(reduce_device)
         total = err if total is None else total + err
         n += 1
     if total is None:
-        # No quantized layers — zero that still participates in autograd graphs if needed.
         p = next(model.parameters(), None)
-        device = p.device if p is not None else torch.device("cpu")
-        return torch.zeros((), device=device)
+        dev = reduce_device if reduce_device is not None else (
+            p.device if p is not None else torch.device("cpu")
+        )
+        return torch.zeros((), device=dev)
     return total / n
 
 
