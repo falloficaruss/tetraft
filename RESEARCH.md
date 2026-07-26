@@ -139,7 +139,31 @@ Report **% parameters quantized** every run.
 
 **Primary:** causal LM cross-entropy on continual pretraining data (FineWeb-Edu sample).
 
-**Optional (if CE plateaus):** KL distillation toward a **frozen original** teacher on the same tokens.
+**Combined recovery loss** (config-driven; defaults keep pure CE):
+
+\[
+\mathcal{L}
+=
+\alpha\,\mathrm{CE}(y, p_s)
++
+(1-\alpha)\,T^{2}\,\mathrm{KL}\big(p_t \,\|\, p_s\big)
++
+\beta\cdot
+\frac{1}{|\mathcal{Q}|}
+\sum_{W\in\mathcal{Q}}
+\big\|W - \mathrm{sg}\big(Q(W)\big)\big\|_{2}^{2}
+\]
+
+| Symbol | Config | Default | Meaning |
+|--------|--------|---------|---------|
+| \(\alpha\) | `distill_alpha` | `1.0` | CE weight; \(\alpha<1\) enables teacher KL |
+| \(T\) | `distill_temperature` | `2.0` | Softmax temperature; KL scaled by \(T^{2}\) |
+| \(\beta\) | `quant_reg_beta` | `0.0` | Grid commitment on all `QuantizedLinear` |
+| \(p_t\) | frozen original FP | — | Teacher; no grad; never quantized |
+| \(p_s\) | student @ current \(\lambda\) | — | TetraFT forward |
+| \(\mathcal{Q}\) | quantized layers | — | Commitment average over layers |
+
+KL is next-token, ignore_index-aware (same shift as causal LM). Scout preset: `scout_kl_5m` (\(\alpha=0.5\), \(T=2\), \(\beta=0.01\), matched \(\lambda_w=256\) vs CE skip-GDN ~60.6).
 
 Do **not** start with chat-only SFT for the main recovery claim.
 

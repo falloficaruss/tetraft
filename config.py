@@ -13,6 +13,12 @@ class QAFTConfig:
     ste_mode: Literal["identity", "clip"] = "identity"
     quant_warmup_steps: int = 1000  # λ ramps from 0 → 1 over this many steps; 0 = hard quant from step 0
 
+    # Recovery objective (α=1, β=0 → pure CE, backward-compatible)
+    # L = α·CE + (1-α)·T²·KL(teacher ‖ student) + β·||W - sg(Q(W))||²
+    distill_alpha: float = 1.0  # 1.0 = CE only; <1 enables teacher KL
+    distill_temperature: float = 2.0
+    quant_reg_beta: float = 0.0  # commitment / grid regularizer weight
+
     # Training (Kaggle 0.8B defaults: small microbatch + accum)
     learning_rate: float = 2e-4
     batch_size: int = 1
@@ -139,7 +145,7 @@ SMOKE_PRESETS: Dict[str, dict] = {
         "skip_linear_attn": True,
         "quaternary_c": 0.25,
     },
-    # 12207 × 4096 ≈ 50.00M — if heal_25m still falling steeply near end
+    # 12207 × 4096 ≈ 50.00M — done ~43.8 PPL (after/orig ~2.48)
     "heal_50m": {
         "max_steps": 12207,
         "quant_warmup_steps": 256,
@@ -152,6 +158,41 @@ SMOKE_PRESETS: Dict[str, dict] = {
         "min_lr_ratio": 0.1,
         "skip_linear_attn": True,
         "quaternary_c": 0.25,
+    },
+    # --- Phase 2b: KL + quant-reg (matched λw=256 vs full_smoke_no_gdn ~60.6) ---
+    # Gate: end PPL < 60.6 at ~5.24M before longer KL heals. Do NOT lengthen λ here.
+    "scout_kl_5m": {
+        "max_steps": 1280,
+        "quant_warmup_steps": 256,
+        "warmup_steps": 128,
+        "logging_steps": 40,
+        "eval_steps": 256,
+        "save_steps": 0,
+        "learning_rate": 2e-4,
+        "lr_scheduler_type": "linear",
+        "min_lr_ratio": 0.0,
+        "skip_linear_attn": True,
+        "quaternary_c": 0.25,
+        "distill_alpha": 0.5,
+        "distill_temperature": 2.0,
+        "quant_reg_beta": 0.01,
+    },
+    # Longer KL heal (use after scout_kl_5m beats ~60.6)
+    "heal_kl_25m": {
+        "max_steps": 6104,
+        "quant_warmup_steps": 256,
+        "warmup_steps": 128,
+        "logging_steps": 50,
+        "eval_steps": 512,
+        "save_steps": 0,
+        "learning_rate": 2e-4,
+        "lr_scheduler_type": "cosine",
+        "min_lr_ratio": 0.1,
+        "skip_linear_attn": True,
+        "quaternary_c": 0.25,
+        "distill_alpha": 0.5,
+        "distill_temperature": 2.0,
+        "quant_reg_beta": 0.01,
     },
     # --- Historical only (worse early DNA; do not default) ---
     # 6104 × 4096 ≈ 25.00M

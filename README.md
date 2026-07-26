@@ -32,9 +32,10 @@ Convert a pretrained model to weights on \(\{-1,-c,c,1\}\), then heal so perform
 | Original | ~17.7 |
 | full_smoke (all Linear) ~5.2M | ~79 |
 | full_smoke + skip GDN ~5.2M | ~60.6 |
-| **`heal_25m` (skip GDN) ~25M** | **~48.2** (after/orig ~2.73) |
+| `heal_25m` (skip GDN) ~25M | ~48.2 |
+| **`heal_50m` (skip GDN) ~50M** | **~43.8** (after/orig ~2.48) |
 
-**Next:** `heal_50m` from scratch (same DNA). Not resume weights-only 25M; not c=0.5.
+**Next:** `scout_kl_5m` (KL+reg, λw=256 matched; gate &lt;60.6). Not CE-only 100M first; not longer λ on 5M scout.
 
 ```python
 from config import QAFTConfig

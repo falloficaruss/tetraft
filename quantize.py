@@ -128,3 +128,53 @@ class QuantizedLinear(nn.Module):
             f"bias={self.bias is not None}, c={self.c}, "
             f"scale_mode={self.scale_mode}, ste_mode={self.ste_mode}"
         )
+
+
+def quant_commitment_loss(model: nn.Module) -> torch.Tensor:
+    """Mean squared commitment ``||W - sg(Q(W))||^2`` over all ``QuantizedLinear`` weights.
+
+    Pulls latent weights toward the discrete grid so the STE path is less dishonest.
+    Returns a scalar on the model's device (0 if no quantized layers).
+    """
+    total = None
+    n = 0
+    for module in model.modules():
+        if not isinstance(module, QuantizedLinear):
+            continue
+        w = module.weight
+        gamma = compute_scale(w, module.scale_mode)
+        w_q = quaternary_quant(w, module.c, gamma)
+        err = (w - w_q.detach()).pow(2).mean()
+        total = err if total is None else total + err
+        n += 1
+    if total is None:
+        # No quantized layers — zero that still participates in autograd graphs if needed.
+        p = next(model.parameters(), None)
+        device = p.device if p is not None else torch.device("cpu")
+        return torch.zeros((), device=device)
+    return total / n
+
+
+def quant_bin_stats(model: nn.Module) -> dict:
+    """Fraction of weights on each quaternary code (global over all QuantizedLinear)."""
+    tallies = {"-1": 0, "-c": 0, "+c": 0, "+1": 0}
+    total = 0
+    c_ref = None
+    with torch.no_grad():
+        for module in model.modules():
+            if not isinstance(module, QuantizedLinear):
+                continue
+            c_ref = module.c
+            gamma = compute_scale(module.weight, module.scale_mode)
+            w_q = quaternary_quant(module.weight, module.c, gamma)
+            codes = (w_q / gamma).reshape(-1)
+            c = float(module.c)
+            tallies["-1"] += int((codes + 1.0).abs().le(1e-4).sum().item())
+            tallies["-c"] += int((codes + c).abs().le(1e-4).sum().item())
+            tallies["+c"] += int((codes - c).abs().le(1e-4).sum().item())
+            tallies["+1"] += int((codes - 1.0).abs().le(1e-4).sum().item())
+            total += codes.numel()
+    if total == 0:
+        return {"n": 0, "frac": {}, "c": c_ref}
+    frac = {k: v / total for k, v in tallies.items()}
+    return {"n": total, "counts": tallies, "frac": frac, "c": c_ref}

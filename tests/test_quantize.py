@@ -279,3 +279,41 @@ class TestQuantizedLinear:
         assert "scale_mode=absmax_channel" in r
         assert "ste_mode=clip" in r
         assert "c=0.5" in r
+
+
+class TestCommitmentAndBins:
+    def test_commitment_loss_zero_when_on_grid(self):
+        from quantize import quant_commitment_loss
+
+        layer = QuantizedLinear(8, 4, bias=False, c=0.25)
+        with torch.no_grad():
+            # Fixed point of absmean_channel Q: uniform |w| so γ=|w| and codes stay ±1.
+            layer.weight.fill_(0.5)
+        model = nn.Sequential(layer)
+        loss = quant_commitment_loss(model)
+        assert loss.ndim == 0
+        assert float(loss.detach()) < 1e-10
+
+    def test_commitment_loss_positive_off_grid(self):
+        from quantize import quant_commitment_loss
+
+        layer = QuantizedLinear(16, 8, bias=False, c=0.25)
+        with torch.no_grad():
+            layer.weight.normal_(0, 1.0)
+        model = nn.Module()
+        model.q = layer
+        loss = quant_commitment_loss(model)
+        assert float(loss) > 0.0
+        loss.backward()
+        assert layer.weight.grad is not None
+
+    def test_bin_stats_sum_to_one(self):
+        from quantize import quant_bin_stats
+
+        layer = QuantizedLinear(32, 16, bias=False, c=0.25)
+        model = nn.Module()
+        model.q = layer
+        stats = quant_bin_stats(model)
+        assert stats["n"] == 32 * 16
+        s = sum(stats["frac"].values())
+        assert abs(s - 1.0) < 1e-5

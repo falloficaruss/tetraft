@@ -17,6 +17,7 @@ from train import (
     _build_scheduler,
     _cosine_with_min_lr_lambda,
     _optimizer_schedule_steps,
+    distillation_kl_loss,
 )
 
 
@@ -124,9 +125,31 @@ class TestSmokePresets:
             "full_smoke_no_gdn",
             "heal_25m",
             "heal_50m",
+            "scout_kl_5m",
+            "heal_kl_25m",
             "scale_25m",
             "scale_50m",
         }
+
+    def test_scout_kl_5m_preset(self):
+        cfg = apply_smoke_preset(QAFTConfig(), "scout_kl_5m")
+        assert cfg.max_steps == 1280
+        assert cfg.tokens_budget() == 1280 * 4096
+        assert cfg.quant_warmup_steps == 256
+        assert cfg.skip_linear_attn is True
+        assert cfg.lr_scheduler_type == "linear"
+        assert cfg.distill_alpha == 0.5
+        assert cfg.distill_temperature == 2.0
+        assert cfg.quant_reg_beta == 0.01
+        assert cfg.quaternary_c == 0.25
+
+    def test_heal_kl_25m_preset(self):
+        cfg = apply_smoke_preset(QAFTConfig(), "heal_kl_25m")
+        assert cfg.max_steps == 6104
+        assert cfg.distill_alpha == 0.5
+        assert cfg.quant_reg_beta == 0.01
+        assert cfg.skip_linear_attn is True
+        assert cfg.lr_scheduler_type == "cosine"
 
     def test_apply_longer_preset(self):
         cfg = QAFTConfig()
@@ -209,6 +232,104 @@ class TestScheduler:
             sched.step()
         lr = sched.get_last_lr()[0]
         assert abs(lr - 1e-4) < 1e-6
+
+
+class TestDistillLoss:
+    def test_kl_finite_and_zero_when_identical(self):
+        logits = torch.randn(2, 8, 16)
+        labels = torch.randint(0, 16, (2, 8))
+        kl = distillation_kl_loss(logits, logits.clone(), labels, temperature=2.0)
+        assert torch.isfinite(kl)
+        assert float(kl) < 1e-4
+
+    def test_kl_positive_when_different(self):
+        torch.manual_seed(0)
+        s = torch.randn(2, 8, 16)
+        t = torch.randn(2, 8, 16)
+        labels = torch.randint(0, 16, (2, 8))
+        kl = distillation_kl_loss(s, t, labels, temperature=2.0)
+        assert float(kl) > 0.0
+
+    def test_trainer_requires_teacher_when_alpha_lt_one(self, tmp_path):
+        model = _TinyLM()
+        cfg = QAFTConfig(
+            use_8bit_adam=False,
+            use_bf16=False,
+            gradient_checkpointing=False,
+            output_dir=str(tmp_path),
+            distill_alpha=0.5,
+            max_steps=2,
+        )
+        try:
+            QAFTTrainer(model, tokenizer=None, config=cfg, teacher=None)
+            assert False, "expected ValueError"
+        except ValueError as e:
+            assert "teacher" in str(e).lower()
+
+    def test_trainer_ce_plus_reg_one_step(self, tmp_path):
+        model = _TinyLM()
+        # Attach a QuantizedLinear so commitment reg is non-trivial
+        model.q = QuantizedLinear(16, 16, bias=False, c=0.25)
+        cfg = QAFTConfig(
+            use_8bit_adam=False,
+            use_bf16=False,
+            gradient_checkpointing=False,
+            output_dir=str(tmp_path),
+            distill_alpha=1.0,
+            quant_reg_beta=0.1,
+            max_steps=2,
+            logging_steps=1,
+            eval_steps=100,
+            warmup_steps=0,
+            quant_warmup_steps=0,
+            gradient_accumulation_steps=1,
+            metrics_filename="",
+        )
+        trainer = QAFTTrainer(model, tokenizer=None, config=cfg)
+        ids = torch.randint(0, 32, (1, 8))
+        batch = {
+            "input_ids": ids,
+            "labels": ids.clone(),
+            "attention_mask": torch.ones_like(ids),
+        }
+        loss, ce, kl, reg = trainer._compute_loss(batch)
+        assert torch.isfinite(loss)
+        assert ce > 0
+        assert kl == 0.0
+        assert reg >= 0.0
+        loss.backward()
+
+    def test_trainer_kl_one_step(self, tmp_path):
+        student = _TinyLM()
+        teacher = _TinyLM()
+        cfg = QAFTConfig(
+            use_8bit_adam=False,
+            use_bf16=False,
+            gradient_checkpointing=False,
+            output_dir=str(tmp_path),
+            distill_alpha=0.5,
+            distill_temperature=2.0,
+            quant_reg_beta=0.0,
+            max_steps=2,
+            logging_steps=1,
+            eval_steps=100,
+            warmup_steps=0,
+            quant_warmup_steps=0,
+            gradient_accumulation_steps=1,
+            metrics_filename="",
+        )
+        trainer = QAFTTrainer(student, tokenizer=None, config=cfg, teacher=teacher)
+        ids = torch.randint(0, 32, (1, 8))
+        batch = {
+            "input_ids": ids,
+            "labels": ids.clone(),
+            "attention_mask": torch.ones_like(ids),
+        }
+        loss, ce, kl, reg = trainer._compute_loss(batch)
+        assert torch.isfinite(loss)
+        assert ce > 0
+        assert kl >= 0.0
+        loss.backward()
 
 
 class TestDiskSafeCheckpoints:

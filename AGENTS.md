@@ -17,9 +17,9 @@ Instructions for coding agents working in this repository.
 ## Current focus
 
 **Read `RESULTS.md` before changing train recipe.**  
-Best: **`heal_25m` → ~48.2 @ 25M** (after/orig ~2.73); scout skip-GDN ~60.6 @ 5.2M; orig ~17.7.  
-**Next:** **`heal_50m` from scratch** (λw=256, skip GDN, cosine+0.1, c=0.25). No weights-only resume as primary.  
-Do not prioritize c=0.5, BitNet, old scale_25m, 2B, or SFT unless asked.
+Best CE: **`heal_50m` → ~43.77 @ 50M** (after/orig ~2.48); `heal_25m` ~48.2; scout skip-GDN ~60.6 @ 5.2M; orig ~17.7.  
+**Next:** **`scout_kl_5m`** (KL α=0.5, T=2, quant_reg β=0.01, λw=**256** matched — gate **&lt;60.6**). Then `heal_kl_25m` if pass.  
+Do not lengthen λ on the 5M gate. Do not prioritize c=0.5, BitNet, CE-only 100M, 2B, or SFT unless asked.
 
 ## Entry pattern
 

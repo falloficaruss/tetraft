@@ -28,8 +28,9 @@ CPU, Internet ON → `notebooks/build_fineweb_sample.ipynb` → Dataset `tetraft
 | Shock (skip GDN) | 0 | ~1.78e4 | milder |
 | `short` | ~0.8M | ~472 | pipeline |
 | `full_smoke` | 5.2M | ~79.4 | all Linear |
-| `full_smoke` + skip GDN | 5.2M | ~60.6 | scope win |
-| **`heal_25m`** | **25.0M** | **~48.2** | **best so far; after/orig ~2.73** |
+| `full_smoke` + skip GDN | 5.2M | ~60.6 | scope win; **5M CE gate** |
+| `heal_25m` | 25.0M | ~48.2 | CE heal |
+| **`heal_50m`** | **50.0M** | **~43.77** | **best CE; after/orig ~2.48** |
 | `scale_25m` (partial) | ~21M | ~68.6 | old DNA; not default |
 
 Stack: BF16 + AdamW8bit + grad ckpt, seq 512, batch 1, accum 8 → **4096 tok/step**.
@@ -55,28 +56,31 @@ If `KeyError: qwen3_5`:
 
 ---
 
-## D. What to run next — `heal_50m`
+## D. What to run next — `scout_kl_5m`
 
-**Locked recipe (c stays 0.25):**
-- `skip_linear_attn=True` (GDN FP)
-- λ_warmup=**256**, peak lr 2e-4
-- Long run: **cosine + min_lr_ratio=0.1**
-- Disk-safe checkpoints (weights-only)
+**CE heal is done** (`heal_50m` ~43.77). Next: **KL + quant-reg** at matched 5M schedule.
+
+**Scout recipe (do not lengthen λ here):**
+- Same as `full_smoke_no_gdn`: skip GDN, λw=**256**, linear→0, lr 2e-4, 1280 steps
+- `distill_alpha=0.5`, `distill_temperature=2.0`, `quant_reg_beta=0.01`
+- Loads **frozen FP teacher** (2× model VRAM)
+- **Gate:** end PPL **&lt; 60.6**
 
 | Preset | ≈ tokens | Status |
 |--------|---------:|--------|
-| `full_smoke_no_gdn` | 5.2M | done ~60.6 |
-| `heal_25m` | 25M | **done ~48.2** |
-| **`heal_50m`** | **50M** | **next — fresh start** (no resume from weights-only 25M) |
+| `full_smoke_no_gdn` | 5.2M | done ~60.6 (CE gate) |
+| `heal_25m` / `heal_50m` | 25M / 50M | done ~48.2 / **~43.77** |
+| **`scout_kl_5m`** | **5.2M** | **next** |
+| `heal_kl_25m` | 25M | after scout pass |
 
 ```bash
-python run_smoke.py --preset heal_50m \
+python run_smoke.py --preset scout_kl_5m \
   --train-data /kaggle/input/.../train.jsonl \
   --val-data /kaggle/input/.../val.jsonl \
-  --output-dir /kaggle/working/checkpoints_heal_50m
+  --output-dir /kaggle/working/checkpoints_scout_kl_5m
 ```
 
-Notebook: set `PRESET = "heal_50m"`.
+Notebook: set `PRESET = "scout_kl_5m"`.
 
 **Not recommended:** resume heal_25m weights-only as primary 50M; old `scale_25m`/`scale_50m`.
 
@@ -98,6 +102,6 @@ Notebook: set `PRESET = "heal_50m"`.
 | 1 + 1b smoke | **COMPLETE** (5.2M → ~79 all-Linear) |
 | 1c scale_25m | **PARTIAL** (obsolete DNA) |
 | 2 scope | **COMPLETE** (skip GDN → ~60.6 @ 5.2M) |
-| 2 length `heal_25m` | **COMPLETE** (**~48.2 @ 25M**, after/orig ~2.73) |
-| **Next** | **`heal_50m` from scratch** |
-| 3 main 100–200M | after 50M signal / recipe freeze |
+| 2 length `heal_25m` / `heal_50m` | **COMPLETE** (~48.2 @ 25M; **~43.77 @ 50M**) |
+| **Next** | **`scout_kl_5m`** (gate &lt;60.6) → `heal_kl_25m` if pass |
+| 3 main 100–200M | after KL recipe freeze |

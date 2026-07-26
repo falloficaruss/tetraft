@@ -107,6 +107,19 @@ def _parse_args(argv=None):
     )
     p.add_argument("--seed", type=int, default=None)
     p.add_argument("--device-map", type=str, default="auto", help="HF device_map (auto|cpu|cuda)")
+    p.add_argument(
+        "--distill-alpha",
+        type=float,
+        default=None,
+        help="CE weight in [0,1]; <1 enables teacher KL (1-α). Default from preset/config.",
+    )
+    p.add_argument("--distill-temperature", type=float, default=None)
+    p.add_argument(
+        "--quant-reg-beta",
+        type=float,
+        default=None,
+        help="Weight on ||W - sg(Q(W))||² commitment loss.",
+    )
     return p.parse_args(argv)
 
 
@@ -155,6 +168,12 @@ def _apply_cli_overrides(config: QAFTConfig, args) -> QAFTConfig:
         config.skip_linear_attn = False
     elif getattr(args, "skip_linear_attn", None) is True:
         config.skip_linear_attn = True
+    if getattr(args, "distill_alpha", None) is not None:
+        config.distill_alpha = args.distill_alpha
+    if getattr(args, "distill_temperature", None) is not None:
+        config.distill_temperature = args.distill_temperature
+    if getattr(args, "quant_reg_beta", None) is not None:
+        config.quant_reg_beta = args.quant_reg_beta
     if args.seed is not None:
         config.seed = args.seed
     return config
@@ -334,11 +353,29 @@ def run_smoke(args=None) -> Dict[str, Any]:
             config.logging_steps = max(1, config.max_steps // 5)
             config.eval_steps = max(1, config.max_steps // 2)
 
+        teacher = None
+        if float(getattr(config, "distill_alpha", 1.0)) < 1.0:
+            logger.info(
+                "Loading frozen FP teacher for KL distill (α=%.3f T=%.2f) …",
+                config.distill_alpha,
+                config.distill_temperature,
+            )
+            teacher, _ = _load_model_and_tokenizer(config, device_map=ns.device_map)
+            teacher.eval()
+            for p in teacher.parameters():
+                p.requires_grad_(False)
+            results["distill"] = {
+                "alpha": config.distill_alpha,
+                "temperature": config.distill_temperature,
+                "quant_reg_beta": config.quant_reg_beta,
+            }
+
         logger.info(
             "Starting QAFT: max_steps=%d, tokens_budget≈%s, seq=%d, batch=%d, "
             "accum=%d, λ_warmup=%d, lr_warmup=%d, lr_sched=%s, min_lr_ratio=%.3f, "
             "bf16=%s, 8bit_adam=%s, save_steps=%d, save_optimizer=%s, "
-            "skip_linear_attn=%s, c=%.3f, scale_mode=%s",
+            "skip_linear_attn=%s, c=%.3f, scale_mode=%s, "
+            "distill_α=%.3f T=%.2f quant_reg_β=%.4f",
             config.max_steps,
             f"{tokens_budget:,}",
             config.seq_length,
@@ -355,8 +392,11 @@ def run_smoke(args=None) -> Dict[str, Any]:
             config.skip_linear_attn,
             config.quaternary_c,
             config.scale_mode,
+            float(getattr(config, "distill_alpha", 1.0)),
+            float(getattr(config, "distill_temperature", 2.0)),
+            float(getattr(config, "quant_reg_beta", 0.0)),
         )
-        trainer = QAFTTrainer(model, tokenizer, config)
+        trainer = QAFTTrainer(model, tokenizer, config, teacher=teacher)
         trainer.train(train_loader, eval_dataloader=val_loader)
 
         set_quant_lambda(model, 1.0)

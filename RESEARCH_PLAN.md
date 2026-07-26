@@ -122,12 +122,12 @@ Long runs: **cosine + min_lr_ratio=0.1** (presets `heal_25m` / `heal_50m`).
 | Priority | Factor | Status |
 |----------|--------|--------|
 | P0 | **scope** (all Linear vs exclude GDN) | ✅ scout @ 5.2M: skip GDN **~60.6** vs all-Linear **~79.4** |
-| P0 | **length** with heal DNA | ✅ `heal_25m` → **~48.2 @ 25M**; **NEXT `heal_50m`** |
+| P0 | **length** with heal DNA | ✅ `heal_25m` ~48.2; ✅ **`heal_50m` ~43.77** (after/orig ~2.48) |
+| P0 | **KL + quant-reg** | **NEXT `scout_kl_5m`** (gate &lt;60.6 @ 5.2M); then `heal_kl_25m` |
 | P0 | **\(c\)** 0.25 vs 0.5 | Deferred (keep **0.25**) |
 | P0 | **scale_mode** | Deferred |
-| P1 | λ / STE / LR shape | cosine+floor in heal presets |
-| P2 | KL to original | if CE stalls after 50M |
-| tokens | 25M done; 50M next; main 100–200M after freeze |
+| P1 | λ / STE / LR shape | cosine+floor in heal; longer λ only after KL @ ≥25M |
+| tokens | CE 50M done; KL scout next; main after freeze |
 
 Details: **`RESULTS.md`**.
 
@@ -217,12 +217,12 @@ Details: **`RESULTS.md`**.
 
 ## 8. Immediate next step
 
-### → **`heal_50m` from scratch** (see `RESULTS.md`)
+### → **`scout_kl_5m`** (see `RESULTS.md`)
 
-1. Recipe locked: skip GDN, λw=256, c=0.25, cosine+0.1 floor, disk-safe  
-2. Kaggle: `--preset heal_50m` — **fresh** run (heal_25m ckpt is weights-only; not seamless resume)  
-3. Goal: beat **~48.2** / after/orig **~2.73**; trend toward orig ~17.7  
-4. If still falling hard near 50M → longer main; if plateau far from orig → other factors  
-5. Deprioritize: c=0.5, old scale DNA, BitNet, 2B  
+1. CE baseline locked: **`heal_50m` → ~43.77** (after/orig ~2.48); CE length diminishing  
+2. Kaggle: `--preset scout_kl_5m` — matched λw=**256** vs CE skip-GDN **~60.6**  
+3. Loss: \(\alpha=0.5\) CE + KL to frozen orig + \(\beta=0.01\) commitment (see `RESEARCH.md` §5)  
+4. **Gate:** end PPL **&lt; 60.6** → then `heal_kl_25m`; do **not** lengthen λ on 5M scout  
+5. Deprioritize: CE-only 100M, c=0.5, BitNet, 2B  
 
 Details: `RESULTS.md`, `KAGGLE.md`.
