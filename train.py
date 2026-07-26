@@ -97,11 +97,17 @@ def _optimizer_schedule_steps(config):
     """Convert micro-step budgets to optimizer-step counts (scheduler.step units).
 
     Trainer calls ``scheduler.step()`` once per optimizer step, i.e. every
-    ``gradient_accumulation_steps`` micro-steps. ``max_steps`` / ``warmup_steps``
-    in config are micro-steps (same as ``global_step``).
+    ``gradient_accumulation_steps`` micro-steps. Horizon is
+    ``schedule_max_steps`` if set, else ``max_steps`` (both micro-steps).
     """
     accum = max(1, config.gradient_accumulation_steps)
-    num_training_steps = max(1, config.max_steps // accum)
+    if hasattr(config, "schedule_horizon_steps"):
+        horizon = int(config.schedule_horizon_steps())
+    else:
+        sm = getattr(config, "schedule_max_steps", None)
+        horizon = int(sm) if sm is not None and int(sm) > 0 else int(config.max_steps)
+    horizon = max(1, horizon)
+    num_training_steps = max(1, horizon // accum)
     num_warmup_steps = min(
         max(0, config.warmup_steps // accum),
         max(0, num_training_steps - 1),
@@ -134,6 +140,10 @@ def _build_scheduler(optimizer, config):
     sched_type = getattr(config, "lr_scheduler_type", "linear") or "linear"
     min_lr_ratio = float(getattr(config, "min_lr_ratio", 0.0) or 0.0)
     min_lr_ratio = min(max(min_lr_ratio, 0.0), 1.0)
+    if hasattr(config, "schedule_horizon_steps"):
+        horizon = int(config.schedule_horizon_steps())
+    else:
+        horizon = int(config.max_steps)
 
     if sched_type == "cosine":
         lr_lambda = partial(
@@ -144,10 +154,13 @@ def _build_scheduler(optimizer, config):
         )
         sched = LambdaLR(optimizer, lr_lambda)
         logger.info(
-            "LR schedule=cosine warmup_opt_steps=%d total_opt_steps=%d min_lr_ratio=%.3f",
+            "LR schedule=cosine warmup_opt_steps=%d total_opt_steps=%d "
+            "min_lr_ratio=%.3f horizon_micro=%d stop_micro=%d",
             num_warmup_steps,
             num_training_steps,
             min_lr_ratio,
+            horizon,
+            int(config.max_steps),
         )
         return sched
 
@@ -160,9 +173,12 @@ def _build_scheduler(optimizer, config):
         num_training_steps=num_training_steps,
     )
     logger.info(
-        "LR schedule=linear warmup_opt_steps=%d total_opt_steps=%d",
+        "LR schedule=linear warmup_opt_steps=%d total_opt_steps=%d "
+        "horizon_micro=%d stop_micro=%d",
         num_warmup_steps,
         num_training_steps,
+        horizon,
+        int(config.max_steps),
     )
     return sched
 
@@ -464,19 +480,32 @@ class QAFTTrainer:
             if full is None
             else bool(full)
         )
+        horizon = (
+            int(self.config.schedule_horizon_steps())
+            if hasattr(self.config, "schedule_horizon_steps")
+            else int(self.config.max_steps)
+        )
         payload: Dict[str, Any] = {
             "step": self.global_step,
             "model_state_dict": self.model.state_dict(),
             "best_perplexity": self.best_perplexity,
             "config": self.config,
             "weights_only": not include_opt,
+            "max_steps": int(self.config.max_steps),
+            "schedule_max_steps": horizon,
         }
         if include_opt:
             payload["optimizer_state_dict"] = self.optimizer.state_dict()
             payload["scheduler_state_dict"] = self.scheduler.state_dict()
         torch.save(payload, path)
         kind = "full" if include_opt else "weights-only"
-        logger.info("Checkpoint saved (%s): %s", kind, path)
+        logger.info(
+            "Checkpoint saved (%s): %s (step=%d horizon=%d)",
+            kind,
+            path,
+            self.global_step,
+            horizon,
+        )
         return path
 
     def _prune_step_checkpoints(self) -> None:
@@ -503,11 +532,14 @@ class QAFTTrainer:
                 logger.warning("Failed to prune %s: %s", path, e)
 
     def load_checkpoint(self, path: str, *, load_optimizer: Optional[bool] = None) -> None:
-        """Load weights; optimizer/scheduler only if present and requested."""
-        ckpt = torch.load(path, map_location=self.device, weights_only=False)
+        """Load weights; optimizer/scheduler only if present and requested.
+
+        Uses ``map_location="cpu"`` so multi-GPU ``device_map`` shards load cleanly.
+        """
+        ckpt = torch.load(path, map_location="cpu", weights_only=False)
         self.model.load_state_dict(ckpt["model_state_dict"])
-        self.global_step = ckpt["step"]
-        self.best_perplexity = ckpt.get("best_perplexity", float("inf"))
+        self.global_step = int(ckpt["step"])
+        self.best_perplexity = float(ckpt.get("best_perplexity", float("inf")))
 
         has_opt = "optimizer_state_dict" in ckpt and "scheduler_state_dict" in ckpt
         want_opt = has_opt if load_optimizer is None else bool(load_optimizer)
@@ -515,15 +547,30 @@ class QAFTTrainer:
             self.optimizer.load_state_dict(ckpt["optimizer_state_dict"])
             self.scheduler.load_state_dict(ckpt["scheduler_state_dict"])
             logger.info(
-                "Checkpoint loaded (full): %s (step %d)", path, self.global_step
+                "Checkpoint loaded (full): %s (step %d / stop %d, schedule_horizon %d)",
+                path,
+                self.global_step,
+                int(self.config.max_steps),
+                int(self.config.schedule_horizon_steps())
+                if hasattr(self.config, "schedule_horizon_steps")
+                else int(self.config.max_steps),
             )
         else:
             if load_optimizer and not has_opt:
                 logger.warning(
-                    "Checkpoint %s has no optimizer state; loaded weights only", path
+                    "Checkpoint %s has no optimizer state; loaded weights only "
+                    "(cosine/Adam will NOT match a continuous 50M run)",
+                    path,
                 )
             logger.info(
                 "Checkpoint loaded (weights-only): %s (step %d)",
                 path,
                 self.global_step,
+            )
+        if self.global_step >= int(self.config.max_steps):
+            logger.warning(
+                "Resumed step %d >= max_steps %d — train() will no-op; "
+                "raise --max-steps for Session B",
+                self.global_step,
+                int(self.config.max_steps),
             )

@@ -24,6 +24,10 @@ class QAFTConfig:
     batch_size: int = 1
     seq_length: int = 512
     max_steps: int = 5000
+    # LR/λ horizon in micro-steps. None → use max_steps. Set equal to full-run
+    # length when Session A stops early (e.g. max_steps=6104, schedule_max_steps=12207)
+    # so cosine matches a single uninterrupted job after resume.
+    schedule_max_steps: Optional[int] = None
     warmup_steps: int = 500
     gradient_accumulation_steps: int = 8
     max_grad_norm: float = 1.0
@@ -75,6 +79,13 @@ class QAFTConfig:
     def tokens_budget(self) -> int:
         """Approx total train tokens for ``max_steps`` micro-steps."""
         return self.max_steps * self.tokens_per_step()
+
+    def schedule_horizon_steps(self) -> int:
+        """Micro-steps used for LR schedule length (full run when resuming)."""
+        h = self.schedule_max_steps
+        if h is None or int(h) <= 0:
+            return max(1, int(self.max_steps))
+        return max(1, int(h))
 
 
 # Token math @ defaults batch=1, seq=512, accum=8 → 4096 tokens / micro-step.
@@ -184,6 +195,26 @@ SMOKE_PRESETS: Dict[str, dict] = {
         "warmup_steps": 128,
         "logging_steps": 50,
         "eval_steps": 512,
+        "save_steps": 0,
+        "learning_rate": 2e-4,
+        "lr_scheduler_type": "cosine",
+        "min_lr_ratio": 0.1,
+        "skip_linear_attn": True,
+        "quaternary_c": 0.25,
+        "distill_alpha": 0.5,
+        "distill_temperature": 2.0,
+        "quant_reg_beta": 0.01,
+    },
+    # Full 50M KL (same DNA as heal_50m + scout KL). Two-session resume:
+    #   Session A: --max-steps 6104 --save-optimizer  (cosine still over 12207)
+    #   Session B: --resume checkpoint-final --max-steps 12207 --skip-shock
+    "heal_kl_50m": {
+        "max_steps": 12207,
+        "schedule_max_steps": 12207,
+        "quant_warmup_steps": 256,
+        "warmup_steps": 128,
+        "logging_steps": 50,
+        "eval_steps": 1024,
         "save_steps": 0,
         "learning_rate": 2e-4,
         "lr_scheduler_type": "cosine",

@@ -95,6 +95,24 @@ def _parse_args(argv=None):
         help="Include optimizer/scheduler state in checkpoints (large; for resume only).",
     )
     p.add_argument(
+        "--resume",
+        type=str,
+        default=None,
+        help="Path to checkpoint (prefer full save with optimizer) to continue training.",
+    )
+    p.add_argument(
+        "--skip-orig",
+        action="store_true",
+        help="Skip original FP PPL (Session B resume speed-up).",
+    )
+    p.add_argument(
+        "--schedule-max-steps",
+        type=int,
+        default=None,
+        help="LR schedule horizon in micro-steps (default: preset / max_steps). "
+        "Keep at full-run length when Session A stops early.",
+    )
+    p.add_argument(
         "--skip-linear-attn",
         action="store_true",
         default=None,
@@ -163,6 +181,8 @@ def _apply_cli_overrides(config: QAFTConfig, args) -> QAFTConfig:
         config.save_steps = args.save_steps
     if getattr(args, "save_optimizer", False):
         config.save_optimizer = True
+    if getattr(args, "schedule_max_steps", None) is not None:
+        config.schedule_max_steps = args.schedule_max_steps
     # Scope: preset may set skip_linear_attn; CLI can force on/off
     if getattr(args, "no_skip_linear_attn", False):
         config.skip_linear_attn = False
@@ -268,6 +288,9 @@ def run_smoke(args=None) -> Dict[str, Any]:
         ("distill_alpha", None),
         ("distill_temperature", None),
         ("quant_reg_beta", None),
+        ("resume", None),
+        ("skip_orig", False),
+        ("schedule_max_steps", None),
     ):
         if not hasattr(ns, field):
             setattr(ns, field, default)
@@ -275,18 +298,27 @@ def run_smoke(args=None) -> Dict[str, Any]:
     config = _apply_cli_overrides(QAFTConfig(), ns)
     torch.manual_seed(config.seed)
 
+    resume_path = getattr(ns, "resume", None)
+    if resume_path:
+        resume_path = str(resume_path).strip() or None
+    if resume_path and not Path(resume_path).is_file():
+        raise FileNotFoundError(f"--resume not found: {resume_path}")
+
     tokens_budget = config.tokens_budget()
+    schedule_horizon = config.schedule_horizon_steps()
     logger.info(
-        "Run preset=%s max_steps=%d tokens_budget≈%s (batch=%d seq=%d accum=%d) "
-        "lr_sched=%s min_lr_ratio=%.3f",
+        "Run preset=%s max_steps=%d schedule_horizon=%d tokens_budget≈%s "
+        "(batch=%d seq=%d accum=%d) lr_sched=%s min_lr_ratio=%.3f resume=%s",
         ns.preset,
         config.max_steps,
+        schedule_horizon,
         f"{tokens_budget:,}",
         config.batch_size,
         config.seq_length,
         config.gradient_accumulation_steps,
         config.lr_scheduler_type,
         config.min_lr_ratio,
+        resume_path or "None",
     )
 
     results: Dict[str, Any] = {
@@ -294,6 +326,8 @@ def run_smoke(args=None) -> Dict[str, Any]:
         "preset": ns.preset,
         "tokens_per_step": config.tokens_per_step(),
         "tokens_budget": tokens_budget,
+        "schedule_horizon_steps": schedule_horizon,
+        "resume": resume_path,
         "config": {k: (str(v) if isinstance(v, Path) else v) for k, v in asdict(config).items()},
     }
 
@@ -320,37 +354,47 @@ def run_smoke(args=None) -> Dict[str, Any]:
     results["train_data"] = train_path
     results["val_data"] = val_path
 
-    # 1.3 Original val PPL
-    logger.info("Measuring original (FP) val PPL …")
-    ppl_orig = evaluate_perplexity(
-        model, val_loader, max_batches=ns.max_eval_batches, device=model_device(model)
-    )
-    results["ppl_original"] = ppl_orig
-    logger.info("Original val PPL: %.4f", ppl_orig)
+    # 1.3 Original val PPL (skip on Session B via --skip-orig)
+    ppl_orig = None
+    skip_orig = bool(getattr(ns, "skip_orig", False))
+    if not skip_orig:
+        logger.info("Measuring original (FP) val PPL …")
+        ppl_orig = evaluate_perplexity(
+            model, val_loader, max_batches=ns.max_eval_batches, device=model_device(model)
+        )
+        results["ppl_original"] = ppl_orig
+        logger.info("Original val PPL: %.4f", ppl_orig)
+    else:
+        logger.info("Skipping original FP PPL (--skip-orig or resume fast path)")
 
-    # 1.4 Shock: hard quant λ=1, zero FT
+    # 1.4 Shock: hard quant λ=1, zero FT (always replace before train/resume)
     ppl_shock = None
-    if not ns.skip_shock:
+    from quantize import QuantizedLinear
+
+    has_q = any(isinstance(m, QuantizedLinear) for m in model.modules())
+    if not has_q:
         logger.info("Applying replace_from_config (quaternary forward) …")
         replace_from_config(model, config, verbose=True)
+    if not ns.skip_shock:
         set_quant_lambda(model, 1.0)
         logger.info("Measuring zero-FT shock PPL (λ=1) …")
         ppl_shock = evaluate_perplexity(
             model, val_loader, max_batches=ns.max_eval_batches, device=model_device(model)
         )
         results["ppl_shock"] = ppl_shock
-        logger.info("Shock val PPL: %.4f (ratio vs orig: %.3f)", ppl_shock, ppl_shock / max(ppl_orig, 1e-8))
+        if ppl_orig is not None:
+            logger.info(
+                "Shock val PPL: %.4f (ratio vs orig: %.3f)",
+                ppl_shock,
+                ppl_shock / max(ppl_orig, 1e-8),
+            )
+        else:
+            logger.info("Shock val PPL: %.4f", ppl_shock)
+    else:
+        logger.info("Skipping shock PPL (--skip-shock)")
 
-    # 1.5 Short QAFT smoke
+    # 1.5 QAFT train (+ optional resume)
     if not ns.skip_train and train_loader is not None:
-        if ns.skip_shock:
-            # Ensure quantized if we skipped shock path
-            from quantize import QuantizedLinear
-
-            has_q = any(isinstance(m, QuantizedLinear) for m in model.modules())
-            if not has_q:
-                replace_from_config(model, config, verbose=True)
-
         # Ultra-short runs: denser logs (still weights-only best/final; no step_* spam)
         if config.max_steps <= 50:
             config.logging_steps = max(1, config.max_steps // 5)
@@ -374,12 +418,13 @@ def run_smoke(args=None) -> Dict[str, Any]:
             }
 
         logger.info(
-            "Starting QAFT: max_steps=%d, tokens_budget≈%s, seq=%d, batch=%d, "
-            "accum=%d, λ_warmup=%d, lr_warmup=%d, lr_sched=%s, min_lr_ratio=%.3f, "
-            "bf16=%s, 8bit_adam=%s, save_steps=%d, save_optimizer=%s, "
-            "skip_linear_attn=%s, c=%.3f, scale_mode=%s, "
-            "distill_α=%.3f T=%.2f quant_reg_β=%.4f",
+            "Starting QAFT: max_steps=%d, schedule_horizon=%d, tokens_budget≈%s, "
+            "seq=%d, batch=%d, accum=%d, λ_warmup=%d, lr_warmup=%d, lr_sched=%s, "
+            "min_lr_ratio=%.3f, bf16=%s, 8bit_adam=%s, save_steps=%d, "
+            "save_optimizer=%s, skip_linear_attn=%s, c=%.3f, scale_mode=%s, "
+            "distill_α=%.3f T=%.2f quant_reg_β=%.4f resume=%s",
             config.max_steps,
+            schedule_horizon,
             f"{tokens_budget:,}",
             config.seq_length,
             config.batch_size,
@@ -398,8 +443,19 @@ def run_smoke(args=None) -> Dict[str, Any]:
             float(getattr(config, "distill_alpha", 1.0)),
             float(getattr(config, "distill_temperature", 2.0)),
             float(getattr(config, "quant_reg_beta", 0.0)),
+            resume_path or "None",
         )
         trainer = QAFTTrainer(model, tokenizer, config, teacher=teacher)
+        if resume_path:
+            # Full ckpt preferred (opt+sched). Weights-only still loads step/weights.
+            want_opt = True
+            trainer.load_checkpoint(resume_path, load_optimizer=want_opt)
+            results["resumed_step"] = trainer.global_step
+            if not config.save_optimizer:
+                logger.warning(
+                    "save_optimizer=False on a resume run — Session end ckpt will be "
+                    "weights-only (cannot seamlessly continue further)"
+                )
         trainer.train(train_loader, eval_dataloader=val_loader)
 
         set_quant_lambda(model, 1.0)
@@ -432,6 +488,17 @@ def run_smoke(args=None) -> Dict[str, Any]:
                 "Gap to original: after/orig = %.3f (target → 1.0)",
                 ppl_after / ppl_orig,
             )
+            results["after_over_orig"] = ppl_after / ppl_orig
+        else:
+            # Frozen FineWeb orig ~17.67 when --skip-orig (Session B)
+            ref_orig = 17.67
+            logger.info(
+                "Gap to original (ref PPL=%.2f): after/orig ≈ %.3f",
+                ref_orig,
+                ppl_after / ref_orig,
+            )
+            results["after_over_orig_ref"] = ppl_after / ref_orig
+            results["ppl_original_ref"] = ref_orig
 
         # Finite-loss check
         losses = trainer.metrics.get("loss", [])

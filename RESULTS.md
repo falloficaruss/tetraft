@@ -23,6 +23,7 @@ Math/method: `RESEARCH.md`. Phases: `RESEARCH_PLAN.md`. Kaggle ops: `KAGGLE.md`.
 | **`full_smoke` + `skip_linear_attn`** | GDN FP; same short schedule | **5.24M** | **~60.6** | **~3.43×** |
 | **`heal_25m`** | GDN FP; λw=**256**, **cosine+0.1**, lr 2e-4 | **25.0M** | **~48.2** | **~2.73×** |
 | **`heal_50m`** | same heal DNA | **50.0M** | **~43.77** | **~2.48** |
+| **`scout_kl_5m`** | skip GDN; λw=256; **KL α=0.5 T=2 β=0.01**; linear | **5.24M** | **~49.31** | **~2.79** |
 | **`scale_25m`** (partial) | all Linear; λw=**512**, cosine+0.1 | **~21.0M** (disk stop) | **~68.6** | **~3.9×** |
 
 **Inventory — all eligible:** ~187 Linear; ~186 eligible; ~**66%** quantized (~498M / ~752M).
@@ -113,7 +114,25 @@ Late drop 51→44 is steep vs prior slope; treat **43.77** as logged final (opti
 
 **CE-only length is no longer the primary lever** toward parity (~1.3×).
 
-### 2.5 `scale_25m` (partial) — historical; wrong DNA
+### 2.5 `scout_kl_5m` (~5.24M) ✅ KL gate PASS
+
+Kaggle 2026-07-26. Matched CE skip-GDN schedule (λw=256, linear→0) + α=0.5 CE/KL, T=2, β=0.01.  
+Shock 17839; inventory 96 eligible / 41%.
+
+| Step | ≈ tokens | PPL (in-train ~5 batch) |
+|-----:|---------:|------------------------:|
+| 256 (λ→1) | ~1.0M | 123.4 |
+| 512 | ~2.1M | 85.8 |
+| 768 | ~3.1M | 73.6 |
+| 1024 | ~4.2M | 61.7 |
+| 1280 mid | ~5.2M | 56.8 |
+| **final (20 batch)** | **5.24M** | **49.31** |
+
+after/orig **~2.79**. vs CE skip-GDN ~60.6: **PASS** (~18.6% relative).  
+≈ CE `heal_25m` (~48.2) at **~5× fewer tokens**. Bins healthy (~30% ±1, ~20% ±c).  
+`reg≈0` in logs (commitment tiny vs CE/KL). Still falling at end → scale KL.
+
+### 2.6 `scale_25m` (partial) — historical; wrong DNA
 
 Interrupted ~21M for disk (full opt dumps). End ~68.6. Obsolete vs heal DNA.
 
@@ -122,14 +141,12 @@ Interrupted ~21M for disk (full opt dumps). End ~68.6. Obsolete vs heal DNA.
 ## 3. Locked takeaways
 
 1. **Method works.** Shock → finite recovery; loss stays finite.
-2. **Best CE result:** **`heal_50m` → ~43.77 @ 50M** (after/orig **~2.48**). Parity still open.
-3. **Scope:** skip GDN locked for heal runs (~41% params quantized).
-4. **Length helps with diminishing returns:** 5.2M→25M→50M: 60.6→48.2→43.8.
-5. **Heal DNA ≫ old scale_25m.**
-6. **Disk-safe ckpts work** for multi-hour jobs.
-7. **Keep \(c=0.25\)** (c=0.5 deferred).
-8. **Next science:** KL + quant-reg scout (`scout_kl_5m`), **not** another plain CE 100M first.
-9. **Do not** put longer λ-warmup in the 5M gate (confounds soft vs hard quant).
+2. **Best CE:** **`heal_50m` → ~43.77 @ 50M** (after/orig **~2.48**).
+3. **Best KL short:** **`scout_kl_5m` → ~49.31 @ 5.2M** — beats CE 5M gate hard.
+4. **Scope:** skip GDN locked (~41% quantized).
+5. **CE length diminishing;** KL is the recovery lever now.
+6. **Keep \(c=0.25\)**, λw=**256** on KL scale-up.
+7. **Next:** **`heal_kl_50m` two-session resume** (cosine horizon 12207).
 
 ---
 
@@ -137,11 +154,10 @@ Interrupted ~21M for disk (full opt dumps). End ~68.6. Obsolete vs heal DNA.
 
 | Question | Status |
 |----------|--------|
-| **`scout_kl_5m` end PPL vs ~60.6** | **Next** |
-| KL 25–50M after scout pass | Pending gate |
-| Longer λ schedule | Deferred (test @ ≥25M, matched time@λ=1) |
-| Better \(c\), scale_mode, STE? | Deferred |
-| FP CPT control (same tokens, no quant) | Recommended paper control |
+| **`heal_kl_50m` end PPL @ 50M** | **Next** (Session A then B) |
+| Mid-25M KL PPL (Session A gate) | TBD |
+| Longer λ schedule | Deferred |
+| FP CPT control | Recommended paper control |
 
 ---
 
@@ -151,45 +167,44 @@ Interrupted ~21M for disk (full opt dumps). End ~68.6. Obsolete vs heal DNA.
 
 | Knob | Value |
 |------|--------|
-| Model | Qwen3.5-0.8B-Base |
-| \(c\) | **0.25** |
-| scale_mode | absmean_channel |
-| STE | identity |
-| Scope | **`skip_linear_attn=True`** |
-| λ_warmup | **256** |
-| Peak lr | 2e-4 |
-| Long-run LR | **cosine → min_lr_ratio=0.1** |
-| Best CE | **`heal_50m` → ~43.77 @ 50M** (after/orig ~2.48) |
+| Best CE | **`heal_50m` → ~43.77 @ 50M** |
 
-### 5.2 KL recovery DNA (in code; unproven until scout)
+### 5.2 KL recovery DNA (scout proven)
 
 | Knob | Value |
 |------|--------|
-| Preset | **`scout_kl_5m`** |
-| Schedule | match `full_smoke_no_gdn`: 1280 steps, λw=**256**, linear→0 |
-| `distill_alpha` | **0.5** |
-| `distill_temperature` | **2.0** |
-| `quant_reg_beta` | **0.01** |
-| Teacher | frozen original FP (second load) |
-| Gate | end PPL **&lt; 60.6** @ ~5.24M |
+| α / T / β | **0.5** / **2.0** / **0.01** |
+| λ_warmup | **256** |
+| Scope | skip GDN, c=0.25 |
+| Scout | **`scout_kl_5m` → ~49.31** ✅ |
+| Scale-up | **`heal_kl_50m`** (schedule_max_steps=**12207**) |
 
-Longer KL: `heal_kl_25m` (after scout pass only).
+### 5.3 Next runs — two-session 50M KL
 
-### 5.3 Next runs
+**Logical one job:** cosine over 12207 steps. Split for Kaggle time.
 
-1. **`scout_kl_5m`** on Kaggle — go if PPL **&lt; 60.6**  
-2. If pass → **`heal_kl_25m`** / 50M with same α,β,T (λw stays 256)  
-3. Longer λ only after KL recipe is established (@ 25M+)  
-4. Deprioritize: CE-only 100M, old scale_*, BitNet, 2B, SFT, c=0.5  
-
+**Session A** (~25M): stop early, **full** ckpt  
 ```bash
-python run_smoke.py --preset scout_kl_5m \
-  --train-data /kaggle/input/.../train.jsonl \
-  --val-data /kaggle/input/.../val.jsonl \
-  --output-dir /kaggle/working/checkpoints_scout_kl_5m
+python run_smoke.py --preset heal_kl_50m \
+  --max-steps 6104 --save-optimizer \
+  --train-data ... --val-data ... \
+  --output-dir /kaggle/working/checkpoints_heal_kl_50m_A
 ```
+Go/no-go: mid PPL ≲ **50–52** → upload `checkpoint-final` (full) as Dataset.
 
-**VRAM:** student + frozen teacher (~2× 0.8B). If OOM: reduce eval batches; last resort lower batch/seq (breaks token math — avoid).
+**Session B** (→50M): resume  
+```bash
+python run_smoke.py --preset heal_kl_50m \
+  --max-steps 12207 \
+  --resume /kaggle/input/.../checkpoint-final \
+  --skip-shock --skip-orig \
+  --train-data ... --val-data ... \
+  --output-dir /kaggle/working/checkpoints_heal_kl_50m_B
+```
+Final bar: **&lt; 43.77** (CE heal_50m); strong ≲ 35.
+
+Notebook: `SESSION = "A"` | `"B"`.  
+**VRAM:** student + teacher. **Disk:** one full ckpt only for A→B.
 
 ---
 
@@ -197,11 +212,11 @@ python run_smoke.py --preset scout_kl_5m \
 
 | Gate | Criterion | Status |
 |------|-----------|--------|
-| Eng | Multi-hour run without disk death | ✅ heal_25m / heal_50m |
+| Eng | Multi-hour without disk death | ✅ |
 | CE scale | PPL **&lt; 48.2** at 50M | ✅ **~43.77** |
-| KL scout | PPL **&lt; 60.6** at 5.24M | TBD `scout_kl_5m` |
-| Parity path | after/orig → 1.0 — not claimed early | open (~2.48 best) |
-| Recipe freeze | Before 100–200M main | after KL scout |
+| KL scout | PPL **&lt; 60.6** at 5.24M | ✅ **~49.31** |
+| KL 50M | PPL **&lt; 43.77** | TBD heal_kl_50m A+B |
+| Parity path | after/orig → 1.0 | open |
 
 ---
 

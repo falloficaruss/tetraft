@@ -127,6 +127,7 @@ class TestSmokePresets:
             "heal_50m",
             "scout_kl_5m",
             "heal_kl_25m",
+            "heal_kl_50m",
             "scale_25m",
             "scale_50m",
         }
@@ -150,6 +151,19 @@ class TestSmokePresets:
         assert cfg.quant_reg_beta == 0.01
         assert cfg.skip_linear_attn is True
         assert cfg.lr_scheduler_type == "cosine"
+
+    def test_heal_kl_50m_preset_and_horizon(self):
+        cfg = apply_smoke_preset(QAFTConfig(), "heal_kl_50m")
+        assert cfg.max_steps == 12207
+        assert cfg.schedule_max_steps == 12207
+        assert cfg.schedule_horizon_steps() == 12207
+        assert cfg.distill_alpha == 0.5
+        assert cfg.skip_linear_attn is True
+        # Session A early stop must not shrink cosine horizon
+        cfg.max_steps = 6104
+        assert cfg.schedule_horizon_steps() == 12207
+        warm, total = _optimizer_schedule_steps(cfg)
+        assert total == 12207 // 8  # full 50M opt steps
 
     def test_apply_longer_preset(self):
         cfg = QAFTConfig()

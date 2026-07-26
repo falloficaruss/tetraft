@@ -123,7 +123,7 @@ Long runs: **cosine + min_lr_ratio=0.1** (presets `heal_25m` / `heal_50m`).
 |----------|--------|--------|
 | P0 | **scope** (all Linear vs exclude GDN) | ✅ scout @ 5.2M: skip GDN **~60.6** vs all-Linear **~79.4** |
 | P0 | **length** with heal DNA | ✅ `heal_25m` ~48.2; ✅ **`heal_50m` ~43.77** (after/orig ~2.48) |
-| P0 | **KL + quant-reg** | **NEXT `scout_kl_5m`** (gate &lt;60.6 @ 5.2M); then `heal_kl_25m` |
+| P0 | **KL + quant-reg** | ✅ `scout_kl_5m` ~49.3; **NEXT `heal_kl_50m` A+B resume** |
 | P0 | **\(c\)** 0.25 vs 0.5 | Deferred (keep **0.25**) |
 | P0 | **scale_mode** | Deferred |
 | P1 | λ / STE / LR shape | cosine+floor in heal; longer λ only after KL @ ≥25M |
@@ -217,12 +217,12 @@ Details: **`RESULTS.md`**.
 
 ## 8. Immediate next step
 
-### → **`scout_kl_5m`** (see `RESULTS.md`)
+### → **`heal_kl_50m` two-session resume** (see `RESULTS.md` / `KAGGLE.md`)
 
-1. CE baseline locked: **`heal_50m` → ~43.77** (after/orig ~2.48); CE length diminishing  
-2. Kaggle: `--preset scout_kl_5m` — matched λw=**256** vs CE skip-GDN **~60.6**  
-3. Loss: \(\alpha=0.5\) CE + KL to frozen orig + \(\beta=0.01\) commitment (see `RESEARCH.md` §5)  
-4. **Gate:** end PPL **&lt; 60.6** → then `heal_kl_25m`; do **not** lengthen λ on 5M scout  
-5. Deprioritize: CE-only 100M, c=0.5, BitNet, 2B  
+1. Scout locked: **`scout_kl_5m` → ~49.31** (PASS vs CE ~60.6)  
+2. Preset `heal_kl_50m`: schedule_max_steps=**12207**, same KL knobs, λw=**256**  
+3. **Session A:** `--max-steps 6104 --save-optimizer` → full `checkpoint-final` Dataset  
+4. **Session B:** `--resume ... --max-steps 12207 --skip-shock --skip-orig`  
+5. Final bar: beat CE **~43.77**; do not lengthen λ  
 
-Details: `RESULTS.md`, `KAGGLE.md`.
+Details: `RESULTS.md`, `KAGGLE.md`, notebook `SESSION=A|B`.
