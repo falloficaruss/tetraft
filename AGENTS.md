@@ -17,9 +17,9 @@ Instructions for coding agents working in this repository.
 ## Current focus
 
 **Read `RESULTS.md` before changing train recipe.**  
-Best CE: **`heal_50m` → ~43.77 @ 50M**; best KL scout: **`scout_kl_5m` → ~49.3 @ 5.2M** (PASS vs CE ~60.6).  
-**Next:** **`heal_kl_50m` two-session resume** — Session A `--max-steps 6104 --save-optimizer`; Session B `--resume` full ckpt to 12207. Cosine horizon always 12207 (`schedule_max_steps`).  
-Do not lengthen λ. Do not prioritize c=0.5, BitNet, CE-only 100M, 2B, or SFT unless asked.
+Best: **`heal_kl_50m` → ~34.38 @ 50M** (after/orig ~1.95); CE `heal_50m` ~43.77; scout_kl ~49.3 @ 5.2M.  
+**Next quality (see `RESULTS.md` §5.4–5.5):** (1) fresh α/T 5M scout vs 49.3; (2) `polish_kl_5m` from B weights (~5M @ lr 2e-5 constant, `max_steps=13487`), gate &lt;34.38.  
+Do not lengthen λ / prioritize c=0.5, BitNet, CE-only, 2B, SFT unless asked.
 
 ## Entry pattern
 

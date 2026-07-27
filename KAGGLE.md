@@ -29,7 +29,9 @@ CPU, Internet ON → `notebooks/build_fineweb_sample.ipynb` → Dataset `tetraft
 | `full_smoke` + skip GDN | 5.2M | ~60.6 | CE 5M gate |
 | `heal_25m` | 25.0M | ~48.2 | CE heal |
 | **`heal_50m`** | **50.0M** | **~43.77** | **best CE** |
-| **`scout_kl_5m`** | **5.2M** | **~49.31** | **KL PASS** vs 60.6 |
+| **`scout_kl_5m`** | **5.2M** | **~49.31** | KL PASS vs 60.6 |
+| **`heal_kl_50m` A** | **25M** | **~48.65** | full ckpt; go/no-go PASS |
+| **`heal_kl_50m` A+B** | **50M** | **~34.38** | **best; after/orig ~1.95** |
 
 Stack: BF16 + AdamW8bit + grad ckpt, seq 512, batch 1, accum 8 → **4096 tok/step**.
 
@@ -40,48 +42,47 @@ Stack: BF16 + AdamW8bit + grad ckpt, seq 512, batch 1, accum 8 → **4096 tok/st
 ## C. Disk lesson
 
 Defaults: weights-only best/final; `save_steps=0`.  
-**Resume sessions:** `save_optimizer=True` → **one** full `checkpoint-final` only (several GB). No `step_*` spam.
+**Resume sessions:** `save_optimizer=True` → **one** full `checkpoint-final` only (several GB). No `step_*` spam.  
+**heal_kl_50m A→B resume worked** (resumed_step=6104 → 12207).
 
 ---
 
-## D. What to run next — `heal_kl_50m` (2 sessions)
+## D. Completed — `heal_kl_50m` (2 sessions) ✅
 
-Logical **one 50M KL run** (cosine over **12207** steps). Split for Kaggle wall time.
+| Session | PPL | Notes |
+|---------|----:|-------|
+| A @ 25M | **48.65** | full final ckpt |
+| B @ 50M | **34.38** | beat CE 43.77; after/orig **1.95** |
 
-### Session A (~25M)
+Replay (if needed): notebook `SESSION=A|B`; see `RESULTS.md` §2.6.
+
+**Next science:** `RESULTS.md` §5.4–5.5:
+
+| Option | What | Gate |
+|--------|------|------|
+| **1 α/T scout** | Fresh `scout_kl_5m` + `--distill-alpha` / `--distill-temperature` | &lt; **49.31** |
+| **2 polish** | preset `polish_kl_5m`, notebook `SESSION=P` | &lt; **34.38** |
+
+### D.1 Polish (`polish_kl_5m`) — ready
+
+Attach B `checkpoint-final` (weights-only OK) + refresh `tetraft-code`.
 
 ```bash
-python run_smoke.py --preset heal_kl_50m \
-  --max-steps 6104 \
-  --save-optimizer \
-  --train-data .../train.jsonl --val-data .../val.jsonl \
-  --output-dir /kaggle/working/checkpoints_heal_kl_50m_A
-```
-
-- Fresh; measure orig + shock  
-- End PPL go/no-go: ≲ **50–52** and falling → upload Dataset  
-- Upload **`checkpoint-final`** (must be **full**, not weights-only)
-
-### Session B (~25M → 50M)
-
-```bash
-python run_smoke.py --preset heal_kl_50m \
-  --max-steps 12207 \
+python run_smoke.py --preset polish_kl_5m \
   --resume /kaggle/input/.../checkpoint-final \
   --skip-shock --skip-orig \
-  --train-data .../train.jsonl --val-data .../val.jsonl \
-  --output-dir /kaggle/working/checkpoints_heal_kl_50m_B
+  --train-data ... --val-data ... \
+  --output-dir /kaggle/working/checkpoints_polish_kl_5m
 ```
 
-- Same preset (horizon stays 12207)  
-- Final bar: CE **~43.77**; strong ≲ 35  
+| Knob | Value |
+|------|--------|
+| stop | **13487** (= 12207 + 1280) |
+| lr | **2e-5** constant (`cosine`, `min_lr_ratio=1.0`, `warmup=0`) |
+| sched horizon | **1280** (fresh Adam; not 12207) |
+| KL | α=0.5 T=2 β=0.01 |
 
-Notebook: `SESSION = "A"` or `"B"` in `notebooks/run_smoke.ipynb`.
-
-| Preset | Status |
-|--------|--------|
-| scout_kl_5m | ✅ ~49.3 |
-| heal_kl_50m A→B | **next** |
+**Sanity:** `resumed_step=12207`, lr≈2e-5 flat, λ=1, ~96 eligible. **`max_steps` &gt; 12207** or train no-ops.
 
 ---
 
@@ -100,4 +101,5 @@ Notebook: `SESSION = "A"` or `"B"` in `notebooks/run_smoke.ipynb`.
 |-------|--------|
 | CE heal 25/50M | ✅ ~48.2 / **~43.77** |
 | KL scout 5M | ✅ **~49.3** PASS |
-| **Next** | **heal_kl_50m Session A** → Dataset → **Session B** |
+| KL 50M A+B | ✅ **~34.38** (after/orig ~1.95) |
+| **Next** | paper hygiene / α–T / optional longer KL (`RESULTS.md` §5.3) |

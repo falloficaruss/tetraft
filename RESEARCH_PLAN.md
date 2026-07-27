@@ -123,7 +123,7 @@ Long runs: **cosine + min_lr_ratio=0.1** (presets `heal_25m` / `heal_50m`).
 |----------|--------|--------|
 | P0 | **scope** (all Linear vs exclude GDN) | ✅ scout @ 5.2M: skip GDN **~60.6** vs all-Linear **~79.4** |
 | P0 | **length** with heal DNA | ✅ `heal_25m` ~48.2; ✅ **`heal_50m` ~43.77** (after/orig ~2.48) |
-| P0 | **KL + quant-reg** | ✅ `scout_kl_5m` ~49.3; **NEXT `heal_kl_50m` A+B resume** |
+| P0 | **KL + quant-reg** | ✅ scout ~49.3; ✅ **`heal_kl_50m` ~34.38 @ 50M** (after/orig ~1.95) |
 | P0 | **\(c\)** 0.25 vs 0.5 | Deferred (keep **0.25**) |
 | P0 | **scale_mode** | Deferred |
 | P1 | λ / STE / LR shape | cosine+floor in heal; longer λ only after KL @ ≥25M |
@@ -217,12 +217,12 @@ Details: **`RESULTS.md`**.
 
 ## 8. Immediate next step
 
-### → **`heal_kl_50m` two-session resume** (see `RESULTS.md` / `KAGGLE.md`)
+### → **Post–`heal_kl_50m` science** (see `RESULTS.md` §5.4–5.5)
 
-1. Scout locked: **`scout_kl_5m` → ~49.31** (PASS vs CE ~60.6)  
-2. Preset `heal_kl_50m`: schedule_max_steps=**12207**, same KL knobs, λw=**256**  
-3. **Session A:** `--max-steps 6104 --save-optimizer` → full `checkpoint-final` Dataset  
-4. **Session B:** `--resume ... --max-steps 12207 --skip-shock --skip-orig`  
-5. Final bar: beat CE **~43.77**; do not lengthen λ  
+1. **Locked SOTA:** KL-50M **~34.38** PPL (after/orig **~1.95**)  
+2. **Option 1:** fresh α/T scout @ 5.2M (gate &lt;49.31) — `scout_kl_5m` + CLI α/T  
+3. **Option 2:** preset `polish_kl_5m` — B weights ~5M @ lr **2e-5** constant, `max_steps=13487` (gate &lt;34.38)  
+4. **Hygiene:** FP CPT control when drafting paper  
+5. Deprioritize: CE-only longer, c=0.5, BitNet, 2B  
 
-Details: `RESULTS.md`, `KAGGLE.md`, notebook `SESSION=A|B`.
+Details: `RESULTS.md` §5.4 / §5.5.

@@ -30,11 +30,11 @@ Convert a pretrained model to weights on \(\{-1,-c,c,1\}\), then heal so perform
 | Milestone | Val PPL |
 |-----------|--------:|
 | Original | ~17.7 |
-| full_smoke + skip GDN ~5.2M | ~60.6 |
-| **scout_kl_5m** ~5.2M | **~49.3** |
-| heal_25m / heal_50m CE | ~48.2 / **~43.8** |
+| CE heal_50m | ~43.8 |
+| scout_kl_5m | ~49.3 |
+| **heal_kl_50m (A+B)** | **~34.4** (after/orig ~1.95) |
 
-**Next:** `heal_kl_50m` two-session resume (A: 25M full ckpt → B: resume to 50M). See `KAGGLE.md`.
+**Next:** `RESULTS.md` §5.4–5.5 — α/T scout and/or `polish_kl_5m` (B weights @ 2e-5).
 
 ```python
 from config import QAFTConfig

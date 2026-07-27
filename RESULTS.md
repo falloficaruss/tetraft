@@ -24,6 +24,8 @@ Math/method: `RESEARCH.md`. Phases: `RESEARCH_PLAN.md`. Kaggle ops: `KAGGLE.md`.
 | **`heal_25m`** | GDN FP; λw=**256**, **cosine+0.1**, lr 2e-4 | **25.0M** | **~48.2** | **~2.73×** |
 | **`heal_50m`** | same heal DNA | **50.0M** | **~43.77** | **~2.48** |
 | **`scout_kl_5m`** | skip GDN; λw=256; **KL α=0.5 T=2 β=0.01**; linear | **5.24M** | **~49.31** | **~2.79** |
+| **`heal_kl_50m` A** | KL DNA; cosine horizon 12207; stop 6104 | **25.0M** | **~48.65** | **~2.75** |
+| **`heal_kl_50m` A+B** | 2-session resume; full 12207 | **50.0M** | **~34.38** | **~1.95** |
 | **`scale_25m`** (partial) | all Linear; λw=**512**, cosine+0.1 | **~21.0M** (disk stop) | **~68.6** | **~3.9×** |
 
 **Inventory — all eligible:** ~187 Linear; ~186 eligible; ~**66%** quantized (~498M / ~752M).
@@ -132,7 +134,32 @@ after/orig **~2.79**. vs CE skip-GDN ~60.6: **PASS** (~18.6% relative).
 ≈ CE `heal_25m` (~48.2) at **~5× fewer tokens**. Bins healthy (~30% ±1, ~20% ±c).  
 `reg≈0` in logs (commitment tiny vs CE/KL). Still falling at end → scale KL.
 
-### 2.6 `scale_25m` (partial) — historical; wrong DNA
+### 2.6 `heal_kl_50m` (~50.0M, 2-session) ✅ **new SOTA**
+
+Kaggle 2026-07-26. Preset `heal_kl_50m`: skip GDN, λw=256, cosine **horizon 12207**, α=0.5 / T=2 / β=0.01.  
+Two-session resume (opt+sched continuous); data reshuffled at session boundary.
+
+| Session | Steps | ≈ tokens | Val PPL | after/orig | Ckpt |
+|---------|------:|---------:|--------:|-----------:|------|
+| **A** | 0→6104 | **25.0M** | **48.65** | **2.75** | full `checkpoint-final` |
+| **B** | 6104→12207 (`resumed_step=6104`) | **50.0M** total | **34.38** | **1.95** | weights-only final |
+
+Shock A: **17839** (matches skip-GDN). Inventory: 96 eligible / **41%** quantized.
+
+**vs controls (same ~50M class budget where noted):**
+
+| Compare | PPL | Δ |
+|---------|----:|---|
+| CE `heal_50m` @ 50M | 43.77 | **KL −9.4** (~21% relative better) |
+| CE `heal_25m` @ 25M | ~48.2 | Session A ≈ tied (~48.65) |
+| `scout_kl_5m` @ 5.2M | 49.31 | 50M KL continues falling hard |
+| Orig | 17.67 | still **~1.95×** (not parity) |
+
+**Read:** Session A mid PPL looks like CE-25M because cosine is only halfway; **second half (B) is where KL pulls away** from CE-50M. Two-session resume **worked** (full A → B).
+
+**Paper-relevant:** first after/orig **&lt; 2.0**; hybrid model (~41% quaternary). Optional cold re-eval of B `checkpoint-final` / best.
+
+### 2.7 `scale_25m` (partial) — historical; wrong DNA
 
 Interrupted ~21M for disk (full opt dumps). End ~68.6. Obsolete vs heal DNA.
 
@@ -140,13 +167,14 @@ Interrupted ~21M for disk (full opt dumps). End ~68.6. Obsolete vs heal DNA.
 
 ## 3. Locked takeaways
 
-1. **Method works.** Shock → finite recovery; loss stays finite.
-2. **Best CE:** **`heal_50m` → ~43.77 @ 50M** (after/orig **~2.48**).
-3. **Best KL short:** **`scout_kl_5m` → ~49.31 @ 5.2M** — beats CE 5M gate hard.
-4. **Scope:** skip GDN locked (~41% quantized).
-5. **CE length diminishing;** KL is the recovery lever now.
-6. **Keep \(c=0.25\)**, λw=**256** on KL scale-up.
-7. **Next:** **`heal_kl_50m` two-session resume** (cosine horizon 12207).
+1. **Method works.** Shock → finite recovery.
+2. **Best overall:** **`heal_kl_50m` → ~34.38 @ 50M** (after/orig **~1.95**).
+3. **Best CE:** `heal_50m` → ~43.77 (KL clearly beats CE at matched budget).
+4. **KL is the recovery lever;** CE length alone plateaus higher.
+5. **Scope:** skip GDN locked (~41% quantized) — always report with PPL.
+6. **Keep \(c=0.25\)**, λw=**256**, α=0.5 / T=2 until ablated.
+7. **Two-session resume** (full opt ckpt + `schedule_max_steps`) is production path for long KL.
+8. **Parity still open** (target ≲1.3× / ~23 PPL).
 
 ---
 
@@ -154,57 +182,126 @@ Interrupted ~21M for disk (full opt dumps). End ~68.6. Obsolete vs heal DNA.
 
 | Question | Status |
 |----------|--------|
-| **`heal_kl_50m` end PPL @ 50M** | **Next** (Session A then B) |
-| Mid-25M KL PPL (Session A gate) | TBD |
-| Longer λ schedule | Deferred |
-| FP CPT control | Recommended paper control |
+| Longer KL (100M+) / α–T ablations | Open — see §5.3 |
+| FP CPT control (same tokens, no quant) | Recommended paper control |
+| Downstream vs orig | Deferred until closer PPL |
+| Longer λ / c=0.5 / all-Linear + KL | Deferred |
+| Bit-shift kernels | Systems track (parallel) |
 
 ---
 
-## 5. Current recipe
-
-### 5.1 CE heal DNA (frozen baseline)
+## 5. Current recipe (frozen KL DNA)
 
 | Knob | Value |
 |------|--------|
-| Best CE | **`heal_50m` → ~43.77 @ 50M** |
-
-### 5.2 KL recovery DNA (scout proven)
-
-| Knob | Value |
-|------|--------|
+| Best | **`heal_kl_50m` → ~34.38 @ 50M** (after/orig ~1.95) |
 | α / T / β | **0.5** / **2.0** / **0.01** |
 | λ_warmup | **256** |
-| Scope | skip GDN, c=0.25 |
-| Scout | **`scout_kl_5m` → ~49.31** ✅ |
-| Scale-up | **`heal_kl_50m`** (schedule_max_steps=**12207**) |
+| LR | 2e-4, cosine → 0.1, horizon = run length |
+| Scope | `skip_linear_attn=True`, c=0.25, ~41% quantized |
+| Teacher | frozen original FP |
 
-### 5.3 Next runs — two-session 50M KL
+### 5.3 Science options next
 
-**Logical one job:** cosine over 12207 steps. Split for Kaggle time.
+**A. Paper hygiene (cheap, high value)**  
+1. **FP continued-pretrain control** — same FineWeb, ~25–50M tokens, **no quant**.  
+2. **Cold re-eval** of KL-50M final/best on full val protocol.  
+3. Freeze tables: Original | Shock | CE-50M | KL-5M | KL-50M | (% quantized).
 
-**Session A** (~25M): stop early, **full** ckpt  
+**B. Two concrete quality runs (documented protocols below)**  
+Independent; either order. Do **not** mix into one job.
+
+**C. Later / parallel**  
+`heal_kl_100m`; GDN+KL; post-quant RMSNorm; 2-bit pack + bit-shift kernels.
+
+**D. Deprioritize**  
+CE-only longer, c=0.5, BitNet, chat SFT, 2B — until gap ≲1.5×.
+
+---
+
+### 5.4 Option 1 — Fresh α / T scout @ ~5.2M
+
+**Goal:** Beat locked scout **`scout_kl_5m` ~49.31** by changing only distill knobs.  
+**Start:** **from scratch** (no resume from heal_kl_50m).  
+**DNA (match scout):** skip GDN, λw=**256**, linear→0, lr **2e-4**, 1280 steps (~5.24M), β=0.01, c=0.25.
+
+| Run ID (suggested) | α | T | Notes |
+|--------------------|---|---|--------|
+| `scout_kl_5m` (done) | 0.5 | 2.0 | **baseline gate 49.31** |
+| `scout_kl_a03_t2` | **0.3** | 2.0 | more teacher |
+| `scout_kl_a05_t1` | 0.5 | **1.0** | harder KL |
+| `scout_kl_a03_t1` | **0.3** | **1.0** | only if both above help |
+
 ```bash
-python run_smoke.py --preset heal_kl_50m \
-  --max-steps 6104 --save-optimizer \
+# Example: more teacher, same 5M schedule
+python run_smoke.py --preset scout_kl_5m \
+  --distill-alpha 0.3 --distill-temperature 2.0 \
   --train-data ... --val-data ... \
-  --output-dir /kaggle/working/checkpoints_heal_kl_50m_A
+  --output-dir /kaggle/working/checkpoints_scout_kl_a03_t2
 ```
-Go/no-go: mid PPL ≲ **50–52** → upload `checkpoint-final` (full) as Dataset.
 
-**Session B** (→50M): resume  
+| Gate | Action |
+|------|--------|
+| End PPL **&lt; 49.31** | Winner; use α/T on next long KL / polish |
+| All ≥ 49.31 | Keep α=0.5 T=2.0; try Option 2 or hygiene |
+
+**Do not** lengthen λ on these scouts. One cell at a time if VRAM/time tight (prefer α=0.3/T=2 first).
+
+---
+
+### 5.5 Option 2 — Polish from heal_kl_50m B @ lr 2e-5 (~5M)
+
+**Goal:** Shave PPL below **~34.38** with small LR + same (or scout-winning) KL.  
+**Start:** **Session B weights** (`checkpoint-final` or best from `heal_kl_50m` B).  
+**Not** a seamless cosine continue — B final is **weights-only** → new Adam; that is intended.
+
+| Knob | Value |
+|------|--------|
+| Init | `--resume` B `checkpoint-final` (weights OK) |
+| Extra tokens | **~5.24M** → **1280** micro-steps |
+| `max_steps` | **resumed_step + 1280** = **12207 + 1280 = 13487** |
+| lr | **2e-5** |
+| Schedule | **constant 2e-5** — cosine + `min_lr_ratio=1.0`, `warmup_steps=0`, `schedule_max_steps=1280` |
+| λ | stays 1 (`global_step` already ≫ 256) |
+| α / T / β | **0.5 / 2.0 / 0.01** unless Option 1 found a winner |
+| Scope | skip GDN (same replace policy) |
+| Flags | `--skip-shock --skip-orig` |
+
 ```bash
-python run_smoke.py --preset heal_kl_50m \
-  --max-steps 12207 \
+# ~5M polish after KL-50M (weights-only resume → new optimizer)
+# Preset locks: max_steps=13487, lr=2e-5 constant, schedule_max_steps=1280
+python run_smoke.py --preset polish_kl_5m \
   --resume /kaggle/input/.../checkpoint-final \
   --skip-shock --skip-orig \
   --train-data ... --val-data ... \
-  --output-dir /kaggle/working/checkpoints_heal_kl_50m_B
+  --output-dir /kaggle/working/checkpoints_polish_kl_5m
 ```
-Final bar: **&lt; 43.77** (CE heal_50m); strong ≲ 35.
 
-Notebook: `SESSION = "A"` | `"B"`.  
-**VRAM:** student + teacher. **Disk:** one full ckpt only for A→B.
+Notebook: `SESSION = "P"`. Weights-only rebuilds Adam+sched from 0 → `schedule_max_steps=1280` is polish length, not 13487.
+
+**Critical:** `max_steps` must be **&gt; resumed_step**. If you leave `max_steps=12207` after loading step 12207, train **no-ops**.
+
+| Gate | Action |
+|------|--------|
+| End PPL **&lt; 34.38** | New SOTA; log here; consider more polish or long run with winning α/T |
+| ≥ 34.38 | Stop polish; try Option 1 or FP CPT hygiene |
+
+**Optional:** 10M polish = `max_steps 12207+2560` (=14767), same lr 2e-5.
+
+---
+
+### 5.6 How the two options relate
+
+| | Option 1 α/T scout | Option 2 polish |
+|--|--------------------|-----------------|
+| Init | Fresh pretrained | KL-50M B weights |
+| Tokens | ~5.2M | ~5.2M (or 10M) |
+| Gate | &lt; **49.31** | &lt; **34.38** |
+| Changes | α, T only | lr 2e-5; continue weights |
+| Independent? | **Yes** | **Yes** |
+
+**Suggested order:** Option 1 first (no big ckpt needed) → Option 2 with baseline α/T or scout winner.  
+**Recommended default path:** hygiene when drafting paper; run **§5.4** and/or **§5.5** for quality; 100M KL only if still far from 1.5×.
 
 ---
 
@@ -212,11 +309,12 @@ Notebook: `SESSION = "A"` | `"B"`.
 
 | Gate | Criterion | Status |
 |------|-----------|--------|
-| Eng | Multi-hour without disk death | ✅ |
+| Eng | Multi-hour / multi-session resume | ✅ |
 | CE scale | PPL **&lt; 48.2** at 50M | ✅ **~43.77** |
 | KL scout | PPL **&lt; 60.6** at 5.24M | ✅ **~49.31** |
-| KL 50M | PPL **&lt; 43.77** | TBD heal_kl_50m A+B |
-| Parity path | after/orig → 1.0 | open |
+| KL 50M vs CE | PPL **&lt; 43.77** | ✅ **~34.38** |
+| KL strong | PPL **≲ 35** | ✅ **~34.38** |
+| Parity path | after/orig ≲ **1.3** (~23) | open (~1.95) |
 
 ---
 

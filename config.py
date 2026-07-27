@@ -225,6 +225,28 @@ SMOKE_PRESETS: Dict[str, dict] = {
         "distill_temperature": 2.0,
         "quant_reg_beta": 0.01,
     },
+    # Polish from heal_kl_50m B weights (~5.24M more tokens). Weights-only resume
+    # rebuilds Adam+sched from 0; schedule_max_steps = polish length (not 13487).
+    #   --resume B/checkpoint-final --skip-shock --skip-orig
+    # stop = resumed_step(12207) + 1280 = 13487; gate PPL < 34.38
+    "polish_kl_5m": {
+        "max_steps": 13487,
+        "schedule_max_steps": 1280,
+        "quant_warmup_steps": 256,
+        "warmup_steps": 0,
+        "logging_steps": 50,
+        "eval_steps": 256,
+        "save_steps": 0,
+        "learning_rate": 2e-5,
+        "lr_scheduler_type": "cosine",
+        "min_lr_ratio": 1.0,
+        "skip_linear_attn": True,
+        "quaternary_c": 0.25,
+        "distill_alpha": 0.5,
+        "distill_temperature": 2.0,
+        "quant_reg_beta": 0.01,
+        "save_optimizer": False,
+    },
     # --- Historical only (worse early DNA; do not default) ---
     # 6104 × 4096 ≈ 25.00M
     "scale_25m": {
