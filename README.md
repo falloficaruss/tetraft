@@ -34,7 +34,7 @@ Convert a pretrained model to weights on \(\{-1,-c,c,1\}\), then heal so perform
 | scout_kl_5m | ~49.3 |
 | **heal_kl_50m (A+B)** | **~34.4** (after/orig ~1.95) |
 
-**Next:** `RESULTS.md` §5.4–5.5 — α/T scout and/or `polish_kl_5m` (B weights @ 2e-5).
+**Next:** α/T scout @ 5.2M (`RESULTS.md` §5.4). Polish FAIL. Future Muon: §5.7.
 
 ```python
 from config import QAFTConfig

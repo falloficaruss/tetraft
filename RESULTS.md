@@ -26,6 +26,7 @@ Math/method: `RESEARCH.md`. Phases: `RESEARCH_PLAN.md`. Kaggle ops: `KAGGLE.md`.
 | **`scout_kl_5m`** | skip GDN; λw=256; **KL α=0.5 T=2 β=0.01**; linear | **5.24M** | **~49.31** | **~2.79** |
 | **`heal_kl_50m` A** | KL DNA; cosine horizon 12207; stop 6104 | **25.0M** | **~48.65** | **~2.75** |
 | **`heal_kl_50m` A+B** | 2-session resume; full 12207 | **50.0M** | **~34.38** | **~1.95** |
+| **`polish_kl_5m`** | B weights; lr 2e-5 const; +1280 | **+5.24M** | **≥34.38** | ❌ FAIL — stop polish |
 | **`scale_25m`** (partial) | all Linear; λw=**512**, cosine+0.1 | **~21.0M** (disk stop) | **~68.6** | **~3.9×** |
 
 **Inventory — all eligible:** ~187 Linear; ~186 eligible; ~**66%** quantized (~498M / ~752M).
@@ -208,68 +209,66 @@ Interrupted ~21M for disk (full opt dumps). End ~68.6. Obsolete vs heal DNA.
 2. **Cold re-eval** of KL-50M final/best on full val protocol.  
 3. Freeze tables: Original | Shock | CE-50M | KL-5M | KL-50M | (% quantized).
 
-**B. Two concrete quality runs (documented protocols below)**  
-Independent; either order. Do **not** mix into one job.
+**B. Quality runs**  
+1. **Now:** §5.4 α/T scout @ 5.2M (gate &lt;49.31).  
+2. ~~§5.5 polish~~ — **FAIL** (did not beat 34.38); **stop** more small-LR continue on B.  
+3. **Later / optional:** §5.7 Muon 5M ablation (**not implemented**).
 
 **C. Later / parallel**  
-`heal_kl_100m`; GDN+KL; post-quant RMSNorm; 2-bit pack + bit-shift kernels.
+`heal_kl_100m` (with locked or winning α/T); GDN+KL; post-quant RMSNorm; 2-bit pack + bit-shift kernels.
 
 **D. Deprioritize**  
-CE-only longer, c=0.5, BitNet, chat SFT, 2B — until gap ≲1.5×.
+More polish on B, CE-only longer, c=0.5, BitNet, chat SFT, 2B — until gap ≲1.5×.
 
 ---
 
-### 5.4 Option 1 — Fresh α / T scout @ ~5.2M
+### 5.4 Option 1 — Fresh α / T scout @ ~5.2M  ← **next**
 
 **Goal:** Beat locked scout **`scout_kl_5m` ~49.31** by changing only distill knobs.  
 **Start:** **from scratch** (no resume from heal_kl_50m).  
-**DNA (match scout):** skip GDN, λw=**256**, linear→0, lr **2e-4**, 1280 steps (~5.24M), β=0.01, c=0.25.
+**DNA (match scout):** skip GDN, λw=**256**, linear→0, lr **2e-4**, AdamW8bit, 1280 steps (~5.24M), β=0.01, c=0.25.
 
 | Run ID (suggested) | α | T | Notes |
 |--------------------|---|---|--------|
 | `scout_kl_5m` (done) | 0.5 | 2.0 | **baseline gate 49.31** |
-| `scout_kl_a03_t2` | **0.3** | 2.0 | more teacher |
+| `scout_kl_a03_t2` | **0.3** | 2.0 | more teacher — **run first** |
 | `scout_kl_a05_t1` | 0.5 | **1.0** | harder KL |
 | `scout_kl_a03_t1` | **0.3** | **1.0** | only if both above help |
 
 ```bash
-# Example: more teacher, same 5M schedule
+# First cell: more teacher, same 5M schedule
 python run_smoke.py --preset scout_kl_5m \
   --distill-alpha 0.3 --distill-temperature 2.0 \
   --train-data ... --val-data ... \
   --output-dir /kaggle/working/checkpoints_scout_kl_a03_t2
 ```
 
+Notebook: `SESSION = "S"`, `SCOUT_ALPHA=0.3`, `SCOUT_TEMPERATURE=2.0`, `SCOUT_TAG="a03_t2"`.  
+No B ckpt. Attach code + FineWeb only.
+
 | Gate | Action |
 |------|--------|
-| End PPL **&lt; 49.31** | Winner; use α/T on next long KL / polish |
-| All ≥ 49.31 | Keep α=0.5 T=2.0; try Option 2 or hygiene |
+| End PPL **&lt; 49.31** | Winner; lock α/T → **fresh** long KL (`heal_kl_50m` DNA + new α/T). Do **not** only re-polish old B. |
+| All ≥ 49.31 | Keep α=0.5 T=2.0; hygiene or longer KL same DNA; optional §5.7 Muon later |
 
-**Do not** lengthen λ on these scouts. One cell at a time if VRAM/time tight (prefer α=0.3/T=2 first).
+**Sanity:** shock ~1.78e4; ~96 eligible / ~41% quantized; teacher loaded (α&lt;1).  
+**Do not** lengthen λ on these scouts. One cell at a time (prefer α=0.3/T=2 first).
 
 ---
 
-### 5.5 Option 2 — Polish from heal_kl_50m B @ lr 2e-5 (~5M)
+### 5.5 Option 2 — Polish from heal_kl_50m B @ lr 2e-5 (~5M)  ❌ **FAIL**
 
-**Goal:** Shave PPL below **~34.38** with small LR + same (or scout-winning) KL.  
-**Start:** **Session B weights** (`checkpoint-final` or best from `heal_kl_50m` B).  
-**Not** a seamless cosine continue — B final is **weights-only** → new Adam; that is intended.
+**Result:** did **not** beat **~34.38**. Treat KL-50M B as **plateau under locked DNA** for small-LR continue.  
+**Do not** run 10M polish or further P sessions on the same B weights unless α/T or other DNA changes first via a **from-scratch** long run.
 
-| Knob | Value |
+| Knob (for replay) | Value |
 |------|--------|
 | Init | `--resume` B `checkpoint-final` (weights OK) |
-| Extra tokens | **~5.24M** → **1280** micro-steps |
-| `max_steps` | **resumed_step + 1280** = **12207 + 1280 = 13487** |
-| lr | **2e-5** |
-| Schedule | **constant 2e-5** — cosine + `min_lr_ratio=1.0`, `warmup_steps=0`, `schedule_max_steps=1280` |
-| λ | stays 1 (`global_step` already ≫ 256) |
-| α / T / β | **0.5 / 2.0 / 0.01** unless Option 1 found a winner |
-| Scope | skip GDN (same replace policy) |
-| Flags | `--skip-shock --skip-orig` |
+| `max_steps` | **13487** (= 12207 + 1280) |
+| lr | **2e-5** constant (`polish_kl_5m`) |
+| Gate | &lt; **34.38** → **missed** |
 
 ```bash
-# ~5M polish after KL-50M (weights-only resume → new optimizer)
-# Preset locks: max_steps=13487, lr=2e-5 constant, schedule_max_steps=1280
 python run_smoke.py --preset polish_kl_5m \
   --resume /kaggle/input/.../checkpoint-final \
   --skip-shock --skip-orig \
@@ -277,31 +276,44 @@ python run_smoke.py --preset polish_kl_5m \
   --output-dir /kaggle/working/checkpoints_polish_kl_5m
 ```
 
-Notebook: `SESSION = "P"`. Weights-only rebuilds Adam+sched from 0 → `schedule_max_steps=1280` is polish length, not 13487.
+---
 
-**Critical:** `max_steps` must be **&gt; resumed_step**. If you leave `max_steps=12207` after loading step 12207, train **no-ops**.
+### 5.6 How options relate (post-polish)
 
-| Gate | Action |
-|------|--------|
-| End PPL **&lt; 34.38** | New SOTA; log here; consider more polish or long run with winning α/T |
-| ≥ 34.38 | Stop polish; try Option 1 or FP CPT hygiene |
+| | §5.4 α/T scout | §5.5 polish | §5.7 Muon (future) |
+|--|----------------|-------------|---------------------|
+| Status | **next** | **FAIL — stop** | documented only |
+| Init | Fresh pretrained | KL-50M B | Fresh pretrained |
+| Tokens | ~5.2M | ~5.2M | ~5.2M |
+| Gate | &lt; **49.31** | &lt; **34.38** | &lt; **49.31** (vs AdamW scout) |
+| Changes | α, T only | lr 2e-5 continue | optimizer only (+ lr retune) |
 
-**Optional:** 10M polish = `max_steps 12207+2560` (=14767), same lr 2e-5.
+**Path now:** §5.4 → if win, fresh long KL with winner α/T; if lose, hygiene / longer same DNA. Muon only after α/T settled (or parallel CE scout if curious).
 
 ---
 
-### 5.6 How the two options relate
+### 5.7 Future — Muon optimizer 5M ablation (**not implemented**)
 
-| | Option 1 α/T scout | Option 2 polish |
-|--|--------------------|-----------------|
-| Init | Fresh pretrained | KL-50M B weights |
-| Tokens | ~5.2M | ~5.2M (or 10M) |
-| Gate | &lt; **49.31** | &lt; **34.38** |
-| Changes | α, T only | lr 2e-5; continue weights |
-| Independent? | **Yes** | **Yes** |
+**Status:** design note only. Code still **AdamW / AdamW8bit** only (`train._build_optimizer`). Do **not** claim Muon numbers until this lands.
 
-**Suggested order:** Option 1 first (no big ckpt needed) → Option 2 with baseline α/T or scout winner.  
-**Recommended default path:** hygiene when drafting paper; run **§5.4** and/or **§5.5** for quality; 100M KL only if still far from 1.5×.
+**Motivation:** matrix-aware updates on 2D `Linear`/`QuantizedLinear` weights; optional lever if AdamW scouts plateau. **Not** a seamless resume from AdamW ckpts; **not** a polish-on-B substitute.
+
+| Knob | Proposed value |
+|------|----------------|
+| Run ID | `scout_kl_muon_5m` (or `scout_ce_muon_5m` first if VRAM tight) |
+| Init | **Fresh** pretrained (same as §5.4) |
+| Tokens / steps | **1280** micro-steps (~5.24M), match `scout_kl_5m` |
+| Quant DNA | skip GDN, λw=**256**, c=0.25, β=0.01 |
+| Distill | locked winner α/T, else **0.5 / 2.0** |
+| LR schedule | linear→0 (or cosine+floor); **retune peak lr** (Muon ≠ AdamW 2e-4) |
+| Optimizer | **Hybrid:** Muon on 2D `requires_grad` weights; **AdamW** on 1D (bias, norms), embeds if trained |
+| Memory | Expect **higher** opt state than AdamW8bit; KL teacher still ~2× model — CE-only Muon scout OK to isolate optimizer |
+| Gate | End PPL **&lt; 49.31** (KL) or **&lt; 60.6** (CE skip-GDN) |
+| Promote? | Only if clearly beats matched AdamW scout → then consider long KL with Muon |
+
+**Impl sketch (when building):** `config.optimizer ∈ {adamw8bit, adamw, muon}`; split param groups in `_build_optimizer`; vendor small Muon (Newton–Schulz) to avoid heavy Kaggle deps; one-step finite-loss test; preset `scout_kl_muon_5m`. Full AdamW↔Muon resume **unsupported**.
+
+**Deprioritize vs:** §5.4 α/T, paper hygiene, longer KL same DNA.
 
 ---
 
@@ -314,6 +326,8 @@ Notebook: `SESSION = "P"`. Weights-only rebuilds Adam+sched from 0 → `schedule
 | KL scout | PPL **&lt; 60.6** at 5.24M | ✅ **~49.31** |
 | KL 50M vs CE | PPL **&lt; 43.77** | ✅ **~34.38** |
 | KL strong | PPL **≲ 35** | ✅ **~34.38** |
+| Polish +5M @ 2e-5 | PPL **&lt; 34.38** | ❌ FAIL — stop polish |
+| α/T scout | PPL **&lt; 49.31** | open (next) |
 | Parity path | after/orig ≲ **1.3** (~23) | open (~1.95) |
 
 ---

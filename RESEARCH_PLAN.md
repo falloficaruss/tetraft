@@ -217,12 +217,12 @@ Details: **`RESULTS.md`**.
 
 ## 8. Immediate next step
 
-### → **Post–`heal_kl_50m` science** (see `RESULTS.md` §5.4–5.5)
+### → **Post–`heal_kl_50m` science** (see `RESULTS.md` §5.4+)
 
 1. **Locked SOTA:** KL-50M **~34.38** PPL (after/orig **~1.95**)  
-2. **Option 1:** fresh α/T scout @ 5.2M (gate &lt;49.31) — `scout_kl_5m` + CLI α/T  
-3. **Option 2:** preset `polish_kl_5m` — B weights ~5M @ lr **2e-5** constant, `max_steps=13487` (gate &lt;34.38)  
-4. **Hygiene:** FP CPT control when drafting paper  
-5. Deprioritize: CE-only longer, c=0.5, BitNet, 2B  
+2. **Now:** fresh α/T scout @ 5.2M (gate &lt;49.31) — `SESSION=S` / `a03_t2` first  
+3. ~~Polish B @ 2e-5~~ — **FAIL**; stop small-LR continue on B  
+4. **Later:** Muon 5M ablation design in §5.7 (**not implemented**); hygiene; longer KL  
+5. Deprioritize: more polish, CE-only longer, c=0.5, BitNet, 2B  
 
-Details: `RESULTS.md` §5.4 / §5.5.
+Details: `RESULTS.md` §5.4 / §5.5 / §5.7.

@@ -18,8 +18,9 @@ Instructions for coding agents working in this repository.
 
 **Read `RESULTS.md` before changing train recipe.**  
 Best: **`heal_kl_50m` → ~34.38 @ 50M** (after/orig ~1.95); CE `heal_50m` ~43.77; scout_kl ~49.3 @ 5.2M.  
-**Next quality (see `RESULTS.md` §5.4–5.5):** (1) fresh α/T 5M scout vs 49.3; (2) `polish_kl_5m` from B weights (~5M @ lr 2e-5 constant, `max_steps=13487`), gate &lt;34.38.  
-Do not lengthen λ / prioritize c=0.5, BitNet, CE-only, 2B, SFT unless asked.
+**Next quality:** fresh **α/T scout** @ 5.2M vs 49.31 (`RESULTS.md` §5.4; notebook `SESSION=S`, first `a03_t2`).  
+Polish on B **FAIL** — do not extend. Future Muon 5M: §5.7 (not implemented).  
+Do not lengthen λ / prioritize c=0.5, BitNet, CE-only, 2B, SFT, Muon impl unless asked.
 
 ## Entry pattern
 
