@@ -80,11 +80,52 @@ def quaternary_quant(w: torch.Tensor, c: float, scale: torch.Tensor) -> torch.Te
 
 
 # ---------------------------------------------------------------------------
+# Optional adapters (R3 pre-RMS / R5 LoRA) + R4 weight calib
+# ---------------------------------------------------------------------------
+
+WeightCalib = Literal["none", "unit_absmean"]
+
+
+class _RMSNorm(nn.Module):
+    """Minimal RMSNorm (γ init 1) for pre-quant input norm on QuantizedLinear."""
+
+    def __init__(self, dim: int, eps: float = 1e-6):
+        super().__init__()
+        self.eps = eps
+        self.weight = nn.Parameter(torch.ones(dim))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # Match input dtype for BF16 training.
+        orig_dtype = x.dtype
+        x_f = x.float()
+        var = x_f.pow(2).mean(dim=-1, keepdim=True)
+        x_f = x_f * torch.rsqrt(var + self.eps)
+        return (self.weight.float() * x_f).to(orig_dtype)
+
+
+@torch.no_grad()
+def apply_weight_calib(weight: torch.Tensor, mode: str = "none") -> torch.Tensor:
+    """R4: one-shot latent weight reshape before QAFT (PT-BitNet-inspired, light)."""
+    if mode in (None, "", "none"):
+        return weight
+    if mode == "unit_absmean":
+        gamma = weight.abs().mean(dim=1, keepdim=True).clamp(min=_EPS)
+        return weight / gamma
+    raise ValueError(f"Unknown weight_calib: {mode}")
+
+
+# ---------------------------------------------------------------------------
 # Quantized Linear layer
 # ---------------------------------------------------------------------------
 
 class QuantizedLinear(nn.Module):
-    """Linear layer with quaternary forward pass and configurable STE."""
+    """Linear layer with quaternary forward pass and configurable STE.
+
+    Optional bundle adapters (RESULTS.md §5.9):
+    - ``pre_rms``: RMSNorm on activations before the matmul (γ=1 init)
+    - ``lora_rank``: low-rank residual on top of STE weights (B=0 init)
+    - weight calib applied at replace time via ``apply_weight_calib``
+    """
 
     def __init__(
         self,
@@ -94,6 +135,9 @@ class QuantizedLinear(nn.Module):
         c: float = 0.25,
         scale_mode: str = "absmean_channel",
         ste_mode: str = "identity",
+        pre_rms: bool = False,
+        lora_rank: int = 0,
+        lora_alpha: Optional[float] = None,
     ):
         super().__init__()
         self.in_features = in_features
@@ -102,12 +146,29 @@ class QuantizedLinear(nn.Module):
         self.scale_mode = scale_mode
         self.ste_mode = ste_mode
         self.lambda_ = 1.0  # can be overridden by the trainer
+        self.pre_rms_enabled = bool(pre_rms)
+        self.lora_rank = int(lora_rank) if lora_rank else 0
+        self.lora_alpha = float(lora_alpha) if lora_alpha is not None else float(
+            self.lora_rank if self.lora_rank > 0 else 1.0
+        )
 
         self.weight = nn.Parameter(torch.empty(out_features, in_features))
         if bias:
             self.bias = nn.Parameter(torch.empty(out_features))
         else:
             self.register_parameter("bias", None)
+
+        if self.pre_rms_enabled:
+            self.pre_rms = _RMSNorm(in_features)
+        else:
+            self.pre_rms = None
+
+        if self.lora_rank > 0:
+            self.lora_A = nn.Parameter(torch.empty(self.lora_rank, in_features))
+            self.lora_B = nn.Parameter(torch.empty(out_features, self.lora_rank))
+        else:
+            self.register_parameter("lora_A", None)
+            self.register_parameter("lora_B", None)
 
         self.reset_parameters()
 
@@ -117,33 +178,47 @@ class QuantizedLinear(nn.Module):
             fan_in = self.in_features
             bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
             nn.init.uniform_(self.bias, -bound, bound)
+        if self.pre_rms is not None:
+            nn.init.ones_(self.pre_rms.weight)
+        if self.lora_rank > 0 and self.lora_A is not None and self.lora_B is not None:
+            nn.init.kaiming_uniform_(self.lora_A, a=math.sqrt(5))
+            nn.init.zeros_(self.lora_B)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def _effective_weight(self) -> torch.Tensor:
         gamma = compute_scale(self.weight, self.scale_mode)
         w_q = quaternary_quant(self.weight, self.c, gamma)
-
-        # ----- Straight-through estimator -----
         # Forward value: (1-λ)W + λ Q(W). Backward: identity STE through W.
         w_eff = self.weight + self.lambda_ * (w_q - self.weight).detach()
-
         if self.ste_mode == "identity":
             pass
         elif self.ste_mode == "clip":
-            # Keep the same forward values, but zero gradients where |W/γ| > 1.
-            # w_eff * mask + w_eff.detach() * (~mask) leaves values unchanged
-            # while blocking grad on outlier positions (RESEARCH.md §3.2).
             mask = (self.weight.detach() / gamma).abs() <= 1.0
             w_eff = w_eff * mask + w_eff.detach() * (~mask)
         else:
             raise ValueError(f"Unknown ste_mode: {self.ste_mode}")
+        return w_eff
 
-        return F.linear(x, w_eff, self.bias)
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if self.pre_rms is not None:
+            x = self.pre_rms(x)
+        w_eff = self._effective_weight()
+        y = F.linear(x, w_eff, self.bias)
+        if (
+            self.lora_rank > 0
+            and self.lora_A is not None
+            and self.lora_B is not None
+        ):
+            scale = self.lora_alpha / float(self.lora_rank)
+            # B=0 ⇒ LoRA path is zero at init (identity residual).
+            y = y + scale * F.linear(F.linear(x, self.lora_A), self.lora_B)
+        return y
 
     def extra_repr(self) -> str:
         return (
             f"in_features={self.in_features}, out_features={self.out_features}, "
             f"bias={self.bias is not None}, c={self.c}, "
-            f"scale_mode={self.scale_mode}, ste_mode={self.ste_mode}"
+            f"scale_mode={self.scale_mode}, ste_mode={self.ste_mode}, "
+            f"pre_rms={self.pre_rms_enabled}, lora_rank={self.lora_rank}"
         )
 
 

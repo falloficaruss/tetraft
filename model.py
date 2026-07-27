@@ -3,7 +3,7 @@ from typing import Any, Dict, List, Optional, Set
 
 import torch.nn as nn
 
-from quantize import QuantizedLinear
+from quantize import QuantizedLinear, apply_weight_calib
 
 logger = logging.getLogger(__name__)
 
@@ -202,6 +202,10 @@ def replace_from_config(model: nn.Module, config, verbose: bool = True) -> nn.Mo
         skip_vision=config.skip_vision,
         skip_mtp=config.skip_mtp,
         skip_linear_attn=bool(getattr(config, "skip_linear_attn", False)),
+        pre_rms=bool(getattr(config, "pre_rms", False)),
+        lora_rank=int(getattr(config, "lora_rank", 0) or 0),
+        lora_alpha=getattr(config, "lora_alpha", None),
+        weight_calib=str(getattr(config, "weight_calib", "none") or "none"),
         verbose=verbose,
     )
 
@@ -216,6 +220,10 @@ def replace_linear_layers(
     skip_vision: bool = True,
     skip_mtp: bool = True,
     skip_linear_attn: bool = False,
+    pre_rms: bool = False,
+    lora_rank: int = 0,
+    lora_alpha: Optional[float] = None,
+    weight_calib: str = "none",
     verbose: bool = True,
 ) -> nn.Module:
     """Replace all eligible ``nn.Linear`` submodules with ``QuantizedLinear``.
@@ -225,6 +233,8 @@ def replace_linear_layers(
 
     When ``skip_linear_attn`` is True, any module path containing ``linear_attn``
     is left in full precision (Qwen3.5 Gated DeltaNet scope ablation).
+
+    Bundle adapters (optional): ``pre_rms``, ``lora_rank``, ``weight_calib``.
     """
     # Build a set of module names to skip (exact or wildcard).
     skip_names: Set[str] = set()
@@ -245,20 +255,37 @@ def replace_linear_layers(
         skip_vision=skip_vision,
         skip_mtp=skip_mtp,
         skip_linear_attn=skip_linear_attn,
+        pre_rms=pre_rms,
+        lora_rank=int(lora_rank or 0),
+        lora_alpha=lora_alpha,
+        weight_calib=weight_calib or "none",
         prefix="",
     )
 
-    # Report
+    # Report quaternary weight mass only (exclude LoRA / pre_rms adapters)
     quantized_params = sum(
-        p.numel() for sub in model.modules() if isinstance(sub, QuantizedLinear)
-        for p in sub.parameters()
+        int(sub.weight.numel())
+        for sub in model.modules()
+        if isinstance(sub, QuantizedLinear)
     )
+    adapter_params = 0
+    for sub in model.modules():
+        if not isinstance(sub, QuantizedLinear):
+            continue
+        if sub.pre_rms is not None:
+            adapter_params += int(sub.pre_rms.weight.numel())
+        if sub.lora_A is not None:
+            adapter_params += int(sub.lora_A.numel())
+        if sub.lora_B is not None:
+            adapter_params += int(sub.lora_B.numel())
     ratio = quantized_params / total_params * 100 if total_params > 0 else 0.0
 
     if verbose:
         logger.info(
-            f"Replace report: {quantized_params:,} / {total_params:,} parameters "
-            f"quantized ({ratio:.1f}%)"
+            f"Replace report: {quantized_params:,} / {total_params:,} weight parameters "
+            f"quantized ({ratio:.1f}%); adapters={adapter_params:,} "
+            f"(pre_rms={pre_rms}, lora_rank={int(lora_rank or 0)}, "
+            f"weight_calib={weight_calib})"
         )
 
     return model
@@ -273,6 +300,10 @@ def _replace_in_module(
     skip_vision: bool,
     skip_mtp: bool,
     skip_linear_attn: bool,
+    pre_rms: bool,
+    lora_rank: int,
+    lora_alpha: Optional[float],
+    weight_calib: str,
     prefix: str,
 ) -> None:
     for name, child in list(module.named_children()):
@@ -299,10 +330,22 @@ def _replace_in_module(
                 c=c,
                 scale_mode=scale_mode,
                 ste_mode=ste_mode,
+                pre_rms=pre_rms,
+                lora_rank=lora_rank,
+                lora_alpha=lora_alpha,
             )
-            qlinear.weight.data = child.weight.data.clone().to(child.weight.dtype)
+            w = child.weight.data.clone().to(child.weight.dtype)
+            w = apply_weight_calib(w, weight_calib)
+            qlinear.weight.data = w
             if child.bias is not None:
                 qlinear.bias.data = child.bias.data.clone()
+            # Keep adapters on same device/dtype as the source linear
+            dev, dt = child.weight.device, child.weight.dtype
+            if qlinear.pre_rms is not None:
+                qlinear.pre_rms.to(device=dev, dtype=dt)
+            if qlinear.lora_A is not None:
+                qlinear.lora_A.data = qlinear.lora_A.data.to(device=dev, dtype=dt)
+                qlinear.lora_B.data = qlinear.lora_B.data.to(device=dev, dtype=dt)
             setattr(module, name, qlinear)
         else:
             _replace_in_module(
@@ -314,5 +357,9 @@ def _replace_in_module(
                 skip_vision=skip_vision,
                 skip_mtp=skip_mtp,
                 skip_linear_attn=skip_linear_attn,
+                pre_rms=pre_rms,
+                lora_rank=lora_rank,
+                lora_alpha=lora_alpha,
+                weight_calib=weight_calib,
                 prefix=full_name,
             )

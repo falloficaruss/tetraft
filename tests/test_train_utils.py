@@ -128,6 +128,7 @@ class TestSmokePresets:
             "scout_kl_5m",
             "heal_kl_25m",
             "heal_kl_50m",
+            "scout_kl_bundle_r345_5m",
             "polish_kl_5m",
             "scale_25m",
             "scale_50m",
@@ -165,6 +166,16 @@ class TestSmokePresets:
         assert cfg.schedule_horizon_steps() == 12207
         warm, total = _optimizer_schedule_steps(cfg)
         assert total == 12207 // 8  # full 50M opt steps
+
+    def test_scout_kl_bundle_r345_5m_preset(self):
+        cfg = apply_smoke_preset(QAFTConfig(), "scout_kl_bundle_r345_5m")
+        assert cfg.max_steps == 1280
+        assert cfg.distill_alpha == 0.5
+        assert cfg.skip_linear_attn is True
+        assert cfg.pre_rms is True
+        assert cfg.weight_calib == "unit_absmean"
+        assert cfg.lora_rank == 8
+        assert cfg.lora_alpha == 8.0
 
     def test_polish_kl_5m_preset(self):
         cfg = apply_smoke_preset(QAFTConfig(), "polish_kl_5m")

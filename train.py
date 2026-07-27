@@ -56,7 +56,14 @@ _STEP_CKPT_RE = re.compile(r"^checkpoint-step_(\d+)$")
 
 def _build_optimizer(model, config):
     """AdamW, preferring bitsandbytes 8-bit when ``config.use_8bit_adam``."""
-    no_decay = ["bias", "LayerNorm.weight", "layer_norm.weight", "ln.weight", "norm.weight"]
+    no_decay = [
+        "bias",
+        "LayerNorm.weight",
+        "layer_norm.weight",
+        "ln.weight",
+        "norm.weight",
+        "pre_rms.weight",
+    ]
     optimizer_grouped_parameters = [
         {
             "params": [

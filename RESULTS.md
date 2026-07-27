@@ -399,6 +399,36 @@ Promote winner only via **fresh** long KL — do not only re-polish B.
 
 More polish-on-B · CE-only marathon · BitNet competitor runs · 2B · chat SFT · Muon before recipe settle · “RMSNorm everywhere” without D0 · more static α/T 5M cells
 
+#### §5.9 Bundle scout R3+R4+R5 @ 5.2M  ← **optional next smoke**
+
+**Goal:** Beat **`scout_kl_5m` ~49.31** with one combined adapter stack (attribution only if PASS).
+
+| Piece | Config | Init |
+|-------|--------|------|
+| R3 pre-RMS | `pre_rms=True` | γ=**1** on each `QuantizedLinear` input |
+| R4 calib | `weight_calib=unit_absmean` | one-shot at replace |
+| R5 LoRA | `lora_rank=8`, `lora_alpha=8` | **B=0** (identity residual) |
+
+| Knob | Value |
+|------|--------|
+| Preset | **`scout_kl_bundle_r345_5m`** |
+| Base DNA | skip GDN, λw=256, linear→0, lr 2e-4, α=0.5 T=2 β=0.01, c=0.25 |
+| Gate | end PPL **&lt; 49.31** (20-batch) |
+| Claim note | hybrid quaternary **+ adapters** (report LoRA/pre_rms param count) |
+
+```bash
+python run_smoke.py --preset scout_kl_bundle_r345_5m \
+  --train-data ... --val-data ... \
+  --output-dir /kaggle/working/checkpoints_scout_kl_bundle_r345_5m
+```
+
+| Gate | Action |
+|------|--------|
+| **&lt; 49.31** | Leave-one-out @ 5M (`--no-pre-rms` / `--weight-calib none` / `--lora-rank 0`) before long KL |
+| **≥ 49.31** | Bundle null @ 5M; try single-knob R5 or R3; do not promote bundle to 100M |
+
+CLI overrides: `--pre-rms` / `--no-pre-rms`, `--weight-calib none|unit_absmean`, `--lora-rank`, `--lora-alpha`.
+
 #### Decision flowchart
 
 ```text

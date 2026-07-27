@@ -58,6 +58,12 @@ class QAFTConfig:
     # Phase 2 scope ablation: leave Qwen3.5 GDN (path ``linear_attn``) in FP
     skip_linear_attn: bool = False
 
+    # Bundle adapters (R3/R4/R5) — defaults off; see scout_kl_bundle_r345_5m
+    pre_rms: bool = False  # R3: RMSNorm before each QuantizedLinear (γ=1 init)
+    weight_calib: Literal["none", "unit_absmean"] = "none"  # R4: one-shot W reshape at replace
+    lora_rank: int = 0  # R5: 0 = off
+    lora_alpha: Optional[float] = None  # None → equal to lora_rank when rank > 0
+
     # Data (paths empty → resolve under ./data or /kaggle/input)
     train_data_path: str = ""
     val_data_path: str = ""
@@ -224,6 +230,28 @@ SMOKE_PRESETS: Dict[str, dict] = {
         "distill_alpha": 0.5,
         "distill_temperature": 2.0,
         "quant_reg_beta": 0.01,
+    },
+    # Bundle smoke R3+R4+R5 @ ~5.24M (gate < scout_kl_5m ~49.31). Fresh start.
+    # If PASS: leave-one-out ablations before long KL. If FAIL: try single-knob R5/R3.
+    "scout_kl_bundle_r345_5m": {
+        "max_steps": 1280,
+        "quant_warmup_steps": 256,
+        "warmup_steps": 128,
+        "logging_steps": 40,
+        "eval_steps": 256,
+        "save_steps": 0,
+        "learning_rate": 2e-4,
+        "lr_scheduler_type": "linear",
+        "min_lr_ratio": 0.0,
+        "skip_linear_attn": True,
+        "quaternary_c": 0.25,
+        "distill_alpha": 0.5,
+        "distill_temperature": 2.0,
+        "quant_reg_beta": 0.01,
+        "pre_rms": True,
+        "weight_calib": "unit_absmean",
+        "lora_rank": 8,
+        "lora_alpha": 8.0,
     },
     # Polish from heal_kl_50m B weights (~5.24M more tokens). Weights-only resume
     # rebuilds Adam+sched from 0; schedule_max_steps = polish length (not 13487).

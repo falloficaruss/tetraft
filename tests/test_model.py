@@ -243,6 +243,32 @@ class TestReplaceLinearLayers:
         mlp = by_name["layers.0.mlp.gate_proj"]
         assert mlp["status"] == "eligible"
 
+    def test_replace_bundle_adapters(self):
+        model = _QwenHybridModel(d=32)
+        # Snapshot a weight before replace for calib check
+        w0 = model.layers[0].self_attn["q_proj"].weight.data.clone()
+        replace_linear_layers(
+            model,
+            c=0.25,
+            skip_linear_attn=True,
+            pre_rms=True,
+            lora_rank=4,
+            lora_alpha=4.0,
+            weight_calib="unit_absmean",
+            verbose=False,
+        )
+        q = model.layers[0].self_attn["q_proj"]
+        assert isinstance(q, QuantizedLinear)
+        assert q.pre_rms is not None
+        assert q.lora_rank == 4
+        assert q.lora_A is not None and q.lora_B is not None
+        assert torch.allclose(q.lora_B, torch.zeros_like(q.lora_B))
+        # unit_absmean: per-out-channel absmean ~ 1
+        am = q.weight.data.abs().mean(dim=1)
+        assert torch.allclose(am, torch.ones_like(am), atol=1e-4)
+        # calib changed vs raw pretrained unless already unit
+        assert not torch.allclose(q.weight.data, w0, atol=1e-5)
+
     def test_replace_from_config_skip_linear_attn(self):
         model = _QwenHybridModel(d=32)
         cfg = QAFTConfig(skip_linear_attn=True)

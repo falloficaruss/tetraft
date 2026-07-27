@@ -62,9 +62,10 @@ Replay (if needed): notebook `SESSION=A|B`; see `RESULTS.md` §2.6.
 
 | Option | What | Gate | Status |
 |--------|------|------|--------|
-| **D0 layer map** | `run_layer_map.py` on B ckpt | role table + suggest | **next** |
-| **D1 KL 100M** | fresh `heal_kl_100m` | &lt; **30** | after D0 |
-| **D2 rep scout** | c / skip q/o / out_scale @ 5M | &lt; **49.31** | after D0 |
+| **D0 layer map** | `run_layer_map.py` on B ckpt | role table + suggest | ✅ done (flat; suggest D1) |
+| **Bundle R345** | `scout_kl_bundle_r345_5m` | &lt; **49.31** | **next smoke** |
+| **D1 KL 100M** | fresh `heal_kl_100m` | &lt; **30** | length floor / after bundle |
+| **D2 rep scout** | single-knob if bundle null | &lt; **49.31** | after bundle FAIL |
 | α/T scout | static α/T @ 5M | &lt; 49.31 | ⚪ null — stop |
 | polish | `polish_kl_5m` | &lt; 34.38 | **FAIL** |
 

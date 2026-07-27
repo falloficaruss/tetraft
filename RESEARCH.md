@@ -167,6 +167,18 @@ KL is next-token, ignore_index-aware (same shift as causal LM). Scout preset: `s
 
 Do **not** start with chat-only SFT for the main recovery claim.
 
+### 5.1 Optional bundle adapters (scout only; off by default)
+
+Config knobs on `QuantizedLinear` / replace (defaults preserve baseline):
+
+| Knob | Default | Effect |
+|------|---------|--------|
+| `pre_rms` | `False` | RMSNorm on activations before matmul; γ init **1** |
+| `weight_calib` | `none` | At replace: `unit_absmean` divides each out-channel by its absmean |
+| `lora_rank` / `lora_alpha` | `0` / `None` | Residual LoRA: \(y \mathrel{+}= (\alpha/r)\,x A^\top B^\top\); **B=0** init |
+
+Preset `scout_kl_bundle_r345_5m` enables all three. Report adapter param count; not pure weight-only quaternary when on.
+
 ---
 
 ## 6. Evaluation (parity with original)

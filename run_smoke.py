@@ -138,6 +138,36 @@ def _parse_args(argv=None):
         default=None,
         help="Weight on ||W - sg(Q(W))||² commitment loss.",
     )
+    p.add_argument(
+        "--pre-rms",
+        action="store_true",
+        default=None,
+        help="R3: RMSNorm before each QuantizedLinear (γ=1 init).",
+    )
+    p.add_argument(
+        "--no-pre-rms",
+        action="store_true",
+        help="Disable pre_rms (override bundle preset).",
+    )
+    p.add_argument(
+        "--weight-calib",
+        type=str,
+        default=None,
+        choices=["none", "unit_absmean"],
+        help="R4: one-shot weight reshape at replace.",
+    )
+    p.add_argument(
+        "--lora-rank",
+        type=int,
+        default=None,
+        help="R5: LoRA rank on QuantizedLinear (0=off).",
+    )
+    p.add_argument(
+        "--lora-alpha",
+        type=float,
+        default=None,
+        help="LoRA alpha (default: equal to rank).",
+    )
     return p.parse_args(argv)
 
 
@@ -194,6 +224,16 @@ def _apply_cli_overrides(config: QAFTConfig, args) -> QAFTConfig:
         config.distill_temperature = args.distill_temperature
     if getattr(args, "quant_reg_beta", None) is not None:
         config.quant_reg_beta = args.quant_reg_beta
+    if getattr(args, "no_pre_rms", False):
+        config.pre_rms = False
+    elif getattr(args, "pre_rms", None) is True:
+        config.pre_rms = True
+    if getattr(args, "weight_calib", None) is not None:
+        config.weight_calib = args.weight_calib
+    if getattr(args, "lora_rank", None) is not None:
+        config.lora_rank = int(args.lora_rank)
+    if getattr(args, "lora_alpha", None) is not None:
+        config.lora_alpha = float(args.lora_alpha)
     if args.seed is not None:
         config.seed = args.seed
     return config
@@ -422,7 +462,8 @@ def run_smoke(args=None) -> Dict[str, Any]:
             "seq=%d, batch=%d, accum=%d, λ_warmup=%d, lr_warmup=%d, lr_sched=%s, "
             "min_lr_ratio=%.3f, bf16=%s, 8bit_adam=%s, save_steps=%d, "
             "save_optimizer=%s, skip_linear_attn=%s, c=%.3f, scale_mode=%s, "
-            "distill_α=%.3f T=%.2f quant_reg_β=%.4f resume=%s",
+            "distill_α=%.3f T=%.2f quant_reg_β=%.4f "
+            "pre_rms=%s weight_calib=%s lora_rank=%s resume=%s",
             config.max_steps,
             schedule_horizon,
             f"{tokens_budget:,}",
@@ -443,6 +484,9 @@ def run_smoke(args=None) -> Dict[str, Any]:
             float(getattr(config, "distill_alpha", 1.0)),
             float(getattr(config, "distill_temperature", 2.0)),
             float(getattr(config, "quant_reg_beta", 0.0)),
+            bool(getattr(config, "pre_rms", False)),
+            getattr(config, "weight_calib", "none"),
+            int(getattr(config, "lora_rank", 0) or 0),
             resume_path or "None",
         )
         trainer = QAFTTrainer(model, tokenizer, config, teacher=teacher)

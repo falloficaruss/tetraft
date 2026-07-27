@@ -4,7 +4,12 @@ import pytest
 
 import torch.nn.functional as F
 
-from quantize import quaternary_quant, QuantizedLinear, compute_scale
+from quantize import (
+    quaternary_quant,
+    QuantizedLinear,
+    compute_scale,
+    apply_weight_calib,
+)
 
 
 # ===========================================================================
@@ -185,6 +190,46 @@ class TestQuantizedLinear:
             opt.step()
 
         assert not torch.allclose(layer.weight, torch.zeros_like(layer.weight), atol=1e-3)
+
+    def test_lora_zero_init_matches_base(self):
+        torch.manual_seed(0)
+        base = QuantizedLinear(16, 8, bias=False, c=0.25, lora_rank=0)
+        with_lora = QuantizedLinear(16, 8, bias=False, c=0.25, lora_rank=4, lora_alpha=4.0)
+        with_lora.weight.data.copy_(base.weight.data)
+        with_lora.lambda_ = base.lambda_ = 1.0
+        x = torch.randn(3, 16)
+        assert torch.allclose(base(x), with_lora(x), atol=1e-5)
+
+    def test_lora_grads(self):
+        layer = QuantizedLinear(16, 8, bias=False, c=0.25, lora_rank=4)
+        x = torch.randn(2, 16)
+        layer(x).sum().backward()
+        assert layer.lora_A.grad is not None
+        assert layer.lora_B.grad is not None
+        assert layer.weight.grad is not None
+
+    def test_pre_rms_gamma_ones_and_grad(self):
+        layer = QuantizedLinear(16, 8, bias=False, c=0.25, pre_rms=True)
+        assert layer.pre_rms is not None
+        assert torch.allclose(layer.pre_rms.weight, torch.ones(16))
+        x = torch.randn(2, 16)
+        layer(x).sum().backward()
+        assert layer.pre_rms.weight.grad is not None
+
+    def test_weight_calib_unit_absmean(self):
+        w = torch.tensor([[2.0, -4.0, 6.0], [1.0, 1.0, 1.0]])
+        out = apply_weight_calib(w, "unit_absmean")
+        row_mean = out.abs().mean(dim=1)
+        assert torch.allclose(row_mean, torch.ones(2), atol=1e-5)
+        assert torch.equal(apply_weight_calib(w, "none"), w)
+
+    def test_bundle_forward_shape(self):
+        layer = QuantizedLinear(
+            32, 16, bias=True, c=0.25, pre_rms=True, lora_rank=8, lora_alpha=8.0
+        )
+        x = torch.randn(2, 4, 32)
+        out = layer(x)
+        assert out.shape == (2, 4, 16)
 
     # ----- Scale modes -----
 
