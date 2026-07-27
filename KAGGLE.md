@@ -57,20 +57,50 @@ Defaults: weights-only best/final; `save_steps=0`.
 
 Replay (if needed): notebook `SESSION=A|B`; see `RESULTS.md` §2.6.
 
-**Next science:** `RESULTS.md` §5.4 (α/T). Polish §5.5 **FAIL** — stop. Muon §5.7 future only.
+**Next science:** `RESULTS.md` §5.8 **D0** layer map → D1 `heal_kl_100m` / D2 rep scouts.  
+α/T §5.4 **null** — lock 0.5/2.0. Polish §5.5 **FAIL** — stop. Muon §5.7 future only.
 
 | Option | What | Gate | Status |
 |--------|------|------|--------|
-| **1 α/T scout** | `SESSION=S` / `scout_kl_5m` + α/T | &lt; **49.31** | **next** |
-| **2 polish** | `polish_kl_5m` | &lt; **34.38** | **FAIL** |
-| **3 Muon 5M** | see `RESULTS.md` §5.7 | vs 49.31 | not implemented |
+| **D0 layer map** | `run_layer_map.py` on B ckpt | role table + suggest | **next** |
+| **D1 KL 100M** | fresh `heal_kl_100m` | &lt; **30** | after D0 |
+| **D2 rep scout** | c / skip q/o / out_scale @ 5M | &lt; **49.31** | after D0 |
+| α/T scout | static α/T @ 5M | &lt; 49.31 | ⚪ null — stop |
+| polish | `polish_kl_5m` | &lt; 34.38 | **FAIL** |
 
-### D.1 α/T scout (`SESSION=S`) — ready ← **run this**
+### D.1 D0 layer map ← **run this**
 
-Attach **code + FineWeb only** (no ckpt). Refresh `tetraft-code`. Notebook default `SESSION="S"`.
+Attach **code + FineWeb + B `checkpoint-final`**. Refresh `tetraft-code`.
 
 ```bash
-# First cell: more teacher
+# Full D0 (PPL + FP-mask top-8)
+python run_layer_map.py \
+  --checkpoint /kaggle/input/.../checkpoint-final \
+  --preset heal_kl_50m \
+  --val-data /kaggle/input/tetraft-fineweb-edu-50m/val.jsonl \
+  --max-eval-batches 20 \
+  --fp-mask-topk 8 \
+  --output-dir /kaggle/working/layer_map_b
+
+# Weight-only if VRAM tight
+python run_layer_map.py \
+  --checkpoint /kaggle/input/.../checkpoint-final \
+  --preset heal_kl_50m --skip-ppl \
+  --output-dir /kaggle/working/layer_map_b
+```
+
+Download `layer_map_summary.json` + paste role table / `suggest=` into `RESULTS.md`.
+
+| Artifact | Contents |
+|----------|----------|
+| `layer_map.csv` / `.json` | per-module rel_l2, mae/γ, bins |
+| `layer_map_summary.json` | by_role, top_modules, ppl, suggest |
+
+### D.1b α/T scout (historical; not priority)
+
+Attach **code + FineWeb only** (no ckpt). Static α/T null — do not re-run unless needed.
+
+```bash
 python run_smoke.py --preset scout_kl_5m \
   --distill-alpha 0.3 --distill-temperature 2.0 \
   --train-data ... --val-data ... \

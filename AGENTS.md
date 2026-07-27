@@ -16,11 +16,11 @@ Instructions for coding agents working in this repository.
 
 ## Current focus
 
-**Read `RESULTS.md` before changing train recipe.**  
+**Read `RESULTS.md` §5.8 before changing train recipe.**  
 Best: **`heal_kl_50m` → ~34.38 @ 50M** (after/orig ~1.95); CE `heal_50m` ~43.77; scout_kl ~49.3 @ 5.2M.  
-**Next quality:** fresh **α/T scout** @ 5.2M vs 49.31 (`RESULTS.md` §5.4; notebook `SESSION=S`, first `a03_t2`).  
-Polish on B **FAIL** — do not extend. Future Muon 5M: §5.7 (not implemented).  
-Do not lengthen λ / prioritize c=0.5, BitNet, CE-only, 2B, SFT, Muon impl unless asked.
+α/T static scout **null** — lock **0.5/2.0**. Polish on B **FAIL** — do not extend (≠ length FAIL).  
+**Next:** §5.8 **D0** layer map on B (`run_layer_map.py`) → **D1** fresh `heal_kl_100m` and/or **D2** one-knob rep scout.  
+Do not: more polish, more static α/T 5M, BitNet, CE-only marathon, 2B, SFT, Muon, free-form extra RMSNorm without D0 — unless asked.
 
 ## Entry pattern
 
@@ -78,6 +78,10 @@ Files are **flat at root** (no package dir) — required for Kaggle Dataset flat
 # tests (repo root on PYTHONPATH)
 pip install pytest torch --quiet
 pytest tests/ -v
+
+# D0 layer map on a heal checkpoint (weight-only)
+python run_layer_map.py --checkpoint path/to/checkpoint-final \
+  --preset heal_kl_50m --skip-ppl --output-dir ./layer_map_out
 ```
 
 ## Architecture notes

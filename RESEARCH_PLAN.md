@@ -124,10 +124,13 @@ Long runs: **cosine + min_lr_ratio=0.1** (presets `heal_25m` / `heal_50m`).
 | P0 | **scope** (all Linear vs exclude GDN) | ✅ scout @ 5.2M: skip GDN **~60.6** vs all-Linear **~79.4** |
 | P0 | **length** with heal DNA | ✅ `heal_25m` ~48.2; ✅ **`heal_50m` ~43.77** (after/orig ~2.48) |
 | P0 | **KL + quant-reg** | ✅ scout ~49.3; ✅ **`heal_kl_50m` ~34.38 @ 50M** (after/orig ~1.95) |
-| P0 | **\(c\)** 0.25 vs 0.5 | Deferred (keep **0.25**) |
-| P0 | **scale_mode** | Deferred |
-| P1 | λ / STE / LR shape | cosine+floor in heal; longer λ only after KL @ ≥25M |
-| tokens | CE 50M done; KL scout next; main after freeze |
+| P0 | static α/T @ 5M | ⚪ **null** — lock 0.5/2.0 (`RESULTS.md` §5.4) |
+| P0 | polish-on-B | ❌ FAIL — stop (`RESULTS.md` §5.5) |
+| P0 | **layer map + KL 100M / rep scouts** | **Next** — `RESULTS.md` §5.8 D0→D1/D2 |
+| P0 | **\(c\)** 0.25 vs 0.5 / learn-\(c\) | Open as D2 scout (keep **0.25** until win) |
+| P0 | **scale_mode** / out_scale | Deferred → D2 after D0 |
+| P1 | λ / STE / LR shape | cosine+floor in heal; longer λ / STE clip = D3 |
+| tokens | CE 50M + KL 50M done; **100M KL** next length test |
 
 Details: **`RESULTS.md`**.
 
@@ -217,12 +220,13 @@ Details: **`RESULTS.md`**.
 
 ## 8. Immediate next step
 
-### → **Post–`heal_kl_50m` science** (see `RESULTS.md` §5.4+)
+### → **Post–null α/T & polish FAIL** (see `RESULTS.md` §5.8)
 
-1. **Locked SOTA:** KL-50M **~34.38** PPL (after/orig **~1.95**)  
-2. **Now:** fresh α/T scout @ 5.2M (gate &lt;49.31) — `SESSION=S` / `a03_t2` first  
-3. ~~Polish B @ 2e-5~~ — **FAIL**; stop small-LR continue on B  
-4. **Later:** Muon 5M ablation design in §5.7 (**not implemented**); hygiene; longer KL  
-5. Deprioritize: more polish, CE-only longer, c=0.5, BitNet, 2B  
+1. **Locked SOTA:** KL-50M **~34.38** PPL (after/orig **~1.95**); α/T **0.5 / 2.0**  
+2. ~~Static α/T scout @ 5.2M~~ — **null**; stop as main lever  
+3. ~~Polish B @ 2e-5~~ — **FAIL**; stop small-LR continue on B (≠ length FAIL)  
+4. **Now:** **§5.8 D0** via `run_layer_map.py` on B ckpt → then **D1** fresh `heal_kl_100m` and/or **D2** one-knob rep scout (\(c\), skip q/o, out_scale)  
+5. **Later:** α schedule, longer λ, STE clip, Muon §5.7; hygiene (FP CPT) parallel  
+6. Deprioritize: more polish, static α/T cells, CE-only longer, BitNet, 2B, free-form extra RMSNorm without D0  
 
-Details: `RESULTS.md` §5.4 / §5.5 / §5.7.
+Details: `RESULTS.md` §5.8 (decision tree), §5.3–§5.7.
