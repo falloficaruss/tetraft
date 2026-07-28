@@ -225,8 +225,10 @@ Details: **`RESULTS.md`**.
 1. **Locked SOTA:** KL-50M **~34.38** PPL (after/orig **~1.95**); α/T **0.5 / 2.0**  
 2. ~~Static α/T scout @ 5.2M~~ — **null**; stop as main lever  
 3. ~~Polish B @ 2e-5~~ — **FAIL**; stop small-LR continue on B (≠ length FAIL)  
-4. **Now:** **§5.8 D0** via `run_layer_map.py` on B ckpt → then **D1** fresh `heal_kl_100m` and/or **D2** one-knob rep scout (\(c\), skip q/o, out_scale)  
-5. **Later:** α schedule, longer λ, STE clip, Muon §5.7; hygiene (FP CPT) parallel  
-6. Deprioritize: more polish, static α/T cells, CE-only longer, BitNet, 2B, free-form extra RMSNorm without D0  
+4. D0 done; bundle R345 FAIL; **R5 LoRA scout ✅ 48.38** @ 5.2M (`RESULTS.md` §2.8)  
+5. **Now:** fresh **long KL + LoRA r=8** (gate &lt;34.38); claim = hybrid Q + LoRA  
+6. **QuEST-inspired §5.10:** soft trust STE (pure path, optional); MSE scale/grid + grad alignment (discussion)  
+7. **Later:** D1 length without LoRA; hygiene (FP CPT); Muon §5.7  
+8. Deprioritize: more polish, static α/T, CE-only longer, BitNet, 2B, R4 unit_absmean  
 
 Details: `RESULTS.md` §5.8 (decision tree), §5.3–§5.7.

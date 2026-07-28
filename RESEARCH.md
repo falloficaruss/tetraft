@@ -55,6 +55,8 @@ Let \(W \in \mathbb{R}^{d_{\mathrm{out}} \times d_{\mathrm{in}}}\) be the **late
 
 \(\varepsilon = 10^{-5}\) (clamp). Compute \(\gamma\) in FP32; do not backprop through \(\gamma\) (detach).
 
+**MSE-optimal scale / grid (discussion — not default).** QuEST-style fitting chooses scale (and optionally grid) to minimize \(\|W-Q(W)\|^2\) under a model of the weight distribution, rather than absmean alone. Open design choices for TetraFT (fixed quaternary \(\mathcal{G}_c\)): optimize only \(\gamma\); jointly \(\gamma\) and \(c\); per-channel vs tensor; online each step vs periodic. **Do not** use `weight_calib=unit_absmean` as a substitute (bundle FAIL). Full discussion: `RESULTS.md` §5.10.2.
+
 ### 2.2 Segmentation
 
 Normalize \(x = W / \gamma\) (broadcast \(\gamma\)). Threshold:
@@ -108,12 +110,23 @@ with `quant_warmup` enabled by default. Ablate hard quant from step 0 and delaye
 
 Gradients flow to latent \(W\) through the STE path of \(\widetilde{W}\).
 
-| Mode | Backward approx |
-|------|-----------------|
-| `identity` (default to implement first) | \(\partial\mathcal{L}/\partial W \approx \partial\mathcal{L}/\partial\widetilde{W}\) |
-| `clip` | \(\partial\mathcal{L}/\partial W \approx (\partial\mathcal{L}/\partial\widetilde{W}) \odot \mathbb{I}(|W/\gamma| \le 1)\) |
+| Mode | Backward approx | Status |
+|------|-----------------|--------|
+| `identity` (default) | \(\partial\mathcal{L}/\partial W \approx \partial\mathcal{L}/\partial\widetilde{W}\) | ✅ implemented |
+| `clip` | \(\partial\mathcal{L}/\partial W \approx (\partial\mathcal{L}/\partial\widetilde{W}) \odot \mathbb{I}(|W/\gamma| \le 1)\) | ✅ implemented |
+| `trust` / soft trust | gate by **quantization error** \(|W-Q(W)|\) (not magnitude) | 📋 planned — `RESULTS.md` §5.10.1 |
 
-Choose by recovery stability on 0.8B, not by external papers.
+**Soft trust (planned).** Let \(e = |W - Q(W)|\) (or normalized \(e/\gamma\)). With threshold \(T\) (e.g. half bin width in the normalized domain) and softness \(s>0\):
+
+\[
+m = \mathrm{clip}\!\left(1 - \frac{e}{T\cdot s},\, 0,\, 1\right),
+\quad
+\frac{\partial\mathcal{L}}{\partial W}
+\approx
+m \odot \frac{\partial\mathcal{L}}{\partial\widetilde{W}}.
+\]
+
+Hard trust (\(s\to 1\), binary \(m=\mathbb{I}(e\le T)\)) can starve high-error entries of gradient under conversion QAFT — **prefer soft**. Inspired by QuEST trust estimation (ICML 2025); we do **not** adopt their full W+A / from-scratch stack. Choose by recovery on 0.8B.
 
 ---
 
@@ -190,11 +203,13 @@ Always evaluate under the **same** protocol as the frozen original:
 2. **Shock:** PPL at \(\lambda=1\), zero training steps vs original
 3. **Recovery curves:** PPL vs tokens
 4. Later: downstream suite (lm-eval); always include an **Original** column
+5. **Optional diagnostics:** layer-wise Q-error map (`run_layer_map.py`); gradient alignment (planned — `RESULTS.md` §5.10.3)
 
 Parity metrics:
 
 - \(\mathrm{PPL}_Q / \mathrm{PPL}_{\mathrm{orig}}\)
 - Relative task scores \(\mathrm{acc}_Q / \mathrm{acc}_{\mathrm{orig}}\) when downstream is enabled
+- Gradient alignment \(\Xi\) (cosine of STE grads vs FP-forward grads) when enabled — **not** a parity claim, diagnostic only
 
 ---
 

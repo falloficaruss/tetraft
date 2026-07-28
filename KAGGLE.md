@@ -57,29 +57,28 @@ Defaults: weights-only best/final; `save_steps=0`.
 
 Replay (if needed): notebook `SESSION=A|B`; see `RESULTS.md` §2.6.
 
-**Next science:** `RESULTS.md` §5.9 **R5-only** LoRA scout.  
-α/T null; polish FAIL; bundle R345 FAIL; D0 done (flat).
+**Next science:** fresh **long KL + LoRA** (`RESULTS.md` §2.8 / §5.9). R5 scout ✅ **48.38**.
 
 | Option | What | Gate | Status |
 |--------|------|------|--------|
 | **D0 layer map** | `run_layer_map.py` on B | role table | ✅ done |
-| **Bundle R345** | R3+R4+R5 | &lt; 49.31 | ❌ FAIL — stop |
-| **R5-only** | `scout_kl_r5_5m` LoRA r=8 | &lt; **49.31** | **next** |
-| **D1 KL 100M** | fresh same DNA | &lt; **30** | length floor |
-| α/T scout | static α/T @ 5M | &lt; 49.31 | ⚪ null |
-| polish | `polish_kl_5m` | &lt; 34.38 | **FAIL** |
+| **Bundle R345** | R3+R4+R5 | &lt; 49.31 | ❌ FAIL |
+| **R5-only** | `scout_kl_r5_5m` | &lt; 49.31 | ✅ **48.38** |
+| **Long KL + LoRA** | heal_kl DNA + lora_rank=8 @ 50M | &lt; **34.38** | **next** |
+| Soft trust STE | §5.10.1 @ 5M | &lt; 49.31 | optional pure path |
+| α/T / polish | — | — | null / FAIL |
 
-### D.0b R5-only scout ← **run this**
+### D.0b R5-only scout ✅ done
 
-Attach **code + FineWeb only**. Refresh `tetraft-code`. Notebook `SESSION="R5"`.
+End PPL **48.38** (gate 49.31). Curve: 117→95→71→61→**48.4**. Adapters ~3.2M.  
+**Do not** re-run scout unless ablating rank. **Next:** long KL with LoRA (preset TBD `heal_kl_lora_50m`).
 
 ```bash
+# Replay only
 python run_smoke.py --preset scout_kl_r5_5m \
   --train-data ... --val-data ... \
   --output-dir /kaggle/working/checkpoints_scout_kl_r5_5m
 ```
-
-Sanity: log `pre_rms=False weight_calib=none lora_rank=8`; @λ=1 PPL not ≫500. Gate end &lt; **49.31**.
 
 ### D.1 D0 layer map ← **run this**
 

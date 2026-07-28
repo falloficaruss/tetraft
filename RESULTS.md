@@ -24,9 +24,11 @@ Math/method: `RESEARCH.md`. Phases: `RESEARCH_PLAN.md`. Kaggle ops: `KAGGLE.md`.
 | **`heal_25m`** | GDN FP; λw=**256**, **cosine+0.1**, lr 2e-4 | **25.0M** | **~48.2** | **~2.73×** |
 | **`heal_50m`** | same heal DNA | **50.0M** | **~43.77** | **~2.48** |
 | **`scout_kl_5m`** | skip GDN; λw=256; **KL α=0.5 T=2 β=0.01**; linear | **5.24M** | **~49.31** | **~2.79** |
+| **`scout_kl_r5_5m`** | same + **LoRA r=8** (no pre_rms/calib) | **5.24M** | **~48.38** | **~2.74** ✅ best 5M |
 | **`heal_kl_50m` A** | KL DNA; cosine horizon 12207; stop 6104 | **25.0M** | **~48.65** | **~2.75** |
 | **`heal_kl_50m` A+B** | 2-session resume; full 12207 | **50.0M** | **~34.38** | **~1.95** |
 | **`polish_kl_5m`** | B weights; lr 2e-5 const; +1280 | **+5.24M** | **≥34.38** | ❌ FAIL — stop polish |
+| Bundle R345 | R3+R4+R5 | ~1M (stop) | ≫1000 @ λ→1 | ❌ FAIL |
 | **`scale_25m`** (partial) | all Linear; λw=**512**, cosine+0.1 | **~21.0M** (disk stop) | **~68.6** | **~3.9×** |
 
 **Inventory — all eligible:** ~187 Linear; ~186 eligible; ~**66%** quantized (~498M / ~752M).
@@ -164,19 +166,39 @@ Shock A: **17839** (matches skip-GDN). Inventory: 96 eligible / **41%** quantize
 
 Interrupted ~21M for disk (full opt dumps). End ~68.6. Obsolete vs heal DNA.
 
+### 2.8 `scout_kl_r5_5m` (~5.24M) ✅ **best 5M scout (LoRA)**
+
+Kaggle 2026-07-28. Preset `scout_kl_r5_5m`: KL DNA + **LoRA r=8 α=8**, no pre_rms, no weight_calib.  
+Shock **17839**; inventory 96 eligible / 41% Q-weights; adapters **~3.19M** LoRA params.  
+Orig **17.67**. Claim: hybrid quaternary **+ LoRA** (not pure weight-only 2-bit).
+
+| Step | ≈ tokens | PPL (in-train ~5 batch unless noted) |
+|-----:|---------:|-------------------------------------:|
+| 256 (λ→1) | ~1.0M | 117.5 |
+| 512 | ~2.1M | 94.7 |
+| 768 | ~3.1M | 70.8 |
+| 1024 | ~4.2M | 60.9 |
+| 1280 mid | ~5.2M | 56.0 |
+| **final (20 batch)** | **5.24M** | **48.38** |
+
+after/orig **~2.74**. vs `scout_kl_5m` **49.31**: **PASS** (−0.93 abs, ~1.9% relative).  
+Bins healthy (~30% ±1, ~20% ±c). `reg≈0`. Healthy λ ramp (no U-style collapse).  
+Still far from KL-50M **34.38** (10× tokens) — promote via **fresh long KL + LoRA**, not polish B.
+
 ---
 
 ## 3. Locked takeaways
 
 1. **Method works.** Shock → finite recovery.
 2. **Best overall:** **`heal_kl_50m` → ~34.38 @ 50M** (after/orig **~1.95**).
-3. **Best CE:** `heal_50m` → ~43.77 (KL clearly beats CE at matched budget).
-4. **KL is the recovery lever;** CE length alone plateaus higher.
-5. **Scope:** skip GDN locked (~41% quantized) — always report with PPL.
-6. **Keep \(c=0.25\)**, λw=**256**, α=0.5 / T=2 until a **gated** D2 ablation wins.
-7. **Two-session resume** (full opt ckpt + `schedule_max_steps`) is production path for long KL.
-8. **Parity still open** (target ≲1.3× / ~23 PPL).
-9. **Polish FAIL ≠ length FAIL**; static α/T @ 5M **null** — next science is **§5.8** (D0→D1/D2).
+3. **Best 5M scout:** **`scout_kl_r5_5m` → ~48.38** (LoRA r=8); pure KL scout ~49.31.
+4. **Best CE:** `heal_50m` → ~43.77 (KL clearly beats CE at matched budget).
+5. **KL is the recovery lever;** CE length alone plateaus higher.
+6. **Scope:** skip GDN locked (~41% quantized) — always report with PPL; LoRA adds ~3.2M when on.
+7. **Keep \(c=0.25\)**, λw=**256**, α=0.5 / T=2 until a **gated** ablation wins.
+8. **Two-session resume** (full opt ckpt + `schedule_max_steps`) is production path for long KL.
+9. **Parity still open** (target ≲1.3× / ~23 PPL).
+10. **Polish FAIL ≠ length FAIL**; α/T null; bundle R345 FAIL; R5 PASS → **fresh long KL + LoRA**.
 
 ---
 
@@ -199,19 +221,20 @@ Interrupted ~21M for disk (full opt dumps). End ~68.6. Obsolete vs heal DNA.
 
 | Knob | Value |
 |------|--------|
-| Best | **`heal_kl_50m` → ~34.38 @ 50M** (after/orig ~1.95) |
+| Best long | **`heal_kl_50m` → ~34.38 @ 50M** (after/orig ~1.95) |
+| Best 5M | **`scout_kl_r5_5m` → ~48.38** (LoRA r=8; after/orig ~2.74) |
 | α / T / β | **0.5** / **2.0** / **0.01** |
 | λ_warmup | **256** (~**1.0M** tokens @ 4096 tok/step — not 16M) |
-| LR | 2e-4, cosine → 0.1, horizon = run length |
-| Scope | `skip_linear_attn=True`, c=0.25, ~41% quantized |
+| LR | 2e-4, cosine → 0.1 (long) / linear→0 (5M scout) |
+| Scope | `skip_linear_attn=True`, c=0.25, ~41% Q-weights; +~3.2M LoRA when R5 |
 | Teacher | frozen original FP |
 
 ### 5.3 Science options next  ← **see §5.8 decision tree**
 
 **A. Now (ordered)**  
-1. **§5.8 D0** — layer-wise quant-error / sensitivity on KL-50M B (+ cold re-eval).  
-2. **§5.8 D1** — fresh **`heal_kl_100m`** same DNA (unless D0 shows a few modules dominate).  
-3. **§5.8 D2** — one-knob representation scouts @ 5.2M (gate &lt;49.31): \(c\), learn-\(c\), skip q/o, output scale.
+1. ~~§5.8 D0~~ ✅ flat error; FP-mask hurt. ~~R5 scout~~ ✅ **48.38**.  
+2. **Fresh long KL + LoRA r=8** (`heal_kl_lora_50m` TBD) — gate &lt; **34.38**.  
+3. Optional: §5.10.1 soft trust @ 5M (pure quaternary); §5.8 D1 length without LoRA.
 
 **B. Paper hygiene (cheap, parallel)**  
 1. **FP continued-pretrain control** — same FineWeb, ~25–50M tokens, **no quant**.  
@@ -222,7 +245,7 @@ Interrupted ~21M for disk (full opt dumps). End ~68.6. Obsolete vs heal DNA.
 2. ~~§5.4 static α/T as main lever~~ — **null @ 5M**; keep α=0.5 T=2.0.
 
 **D. Later / optional**  
-α schedule (not only static α); longer λ; STE `clip`; β micro-sweep; GDN+KL; post-quant RMSNorm (after output scale); Muon §5.7; 2-bit pack.
+**§5.10** soft trust STE (P0 QuEST import); MSE scale/grid + grad alignment (discussion); α schedule; longer λ; STE `clip`; β micro-sweep; GDN+KL; Muon §5.7; 2-bit pack.
 
 **E. Deprioritize**  
 More polish on B, CE-only longer, BitNet baselines, chat SFT, 2B, free-form “extra RMSNorm everywhere” without D0 — until gap ≲1.5×.
@@ -406,18 +429,27 @@ More polish-on-B · CE-only marathon · BitNet competitor runs · 2B · chat SFT
 Preset `scout_kl_bundle_r345_5m`. Mid-run PPL **≫1000** at λ→1 (~step 256); stopped early.  
 **Suspected:** R4 `unit_absmean` (destroys pretrained channel scales). Do **not** rerun bundle or R4-as-is.
 
-##### R5-only LoRA  ← **next smoke**
+##### R5-only LoRA  ✅ **PASS — best 5M**
 
-**Goal:** Beat **`scout_kl_5m` ~49.31** with LoRA residual only (ApiQ-style; B=0 init).
+**Result (2026-07-28):** end PPL **48.38** &lt; gate **49.31**. Curve §2.8.  
+Adapters ~3.19M; pre_rms=False; weight_calib=none; shock 17839; bins healthy.
 
 | Knob | Value |
 |------|--------|
 | Preset | **`scout_kl_r5_5m`** |
 | Base DNA | skip GDN, λw=256, linear→0, lr 2e-4, α=0.5 T=2 β=0.01, c=0.25 |
-| R3 / R4 | **off** (`pre_rms=False`, `weight_calib=none`) |
 | R5 | `lora_rank=8`, `lora_alpha=8` |
-| Gate | end PPL **&lt; 49.31** (20-batch) |
-| Claim note | hybrid quaternary **+ LoRA** (not pure weight-only 2-bit) |
+| Gate | &lt; **49.31** → **met (48.38)** |
+
+**Promote:** fresh long KL with **same LoRA DNA** (not polish B; not weight-only heal_kl_50m alone).
+
+| Next run | Spec | Gate |
+|----------|------|------|
+| **`heal_kl_lora_50m`** (to add) | heal_kl_50m DNA + lora_rank=8 α=8; cosine 12207; 2-session | end PPL **&lt; 34.38** |
+| Optional 100M | same + longer horizon | stretch ≪34 |
+
+If long LoRA only ties ~34–35 → LoRA is a 5M efficiency trick, not a 50M lever.  
+CLI: `--lora-rank`, `--lora-alpha`. Replay scout:
 
 ```bash
 python run_smoke.py --preset scout_kl_r5_5m \
@@ -425,21 +457,161 @@ python run_smoke.py --preset scout_kl_r5_5m \
   --output-dir /kaggle/working/checkpoints_scout_kl_r5_5m
 ```
 
-Notebook: `SESSION = "R5"`. Fresh start; code + FineWeb only.
+#### §5.10 QuEST-inspired directions (accepted for TetraFT)
 
-| Check | Expect |
-|--------|--------|
-| Log | `pre_rms=False weight_calib=none lora_rank=8` |
-| @ λ→1 (~256) | PPL ~100–170 class like scout_kl — **abort if ≫500** |
-| End | &lt; **49.31** PASS → fresh long KL **with** LoRA; else R5 null @ 5M |
+Source: **QuEST** (Panferov et al., ICML 2025) — from-scratch W+A QAT; we import **ideas only**, not their full stack.  
+OpenReview: `https://openreview.net/pdf?id=I0Ux2nAN6u`.
 
-| Gate | Action |
+| Idea | TetraFT stance | Priority |
+|------|----------------|----------|
+| Soft error-gated STE (“trust”) | **Accepted** — implement after/with current scouts | **P0 method** |
+| MSE-optimal scale / grid | **Accepted for discussion** — design before code | P1 |
+| Gradient alignment diagnostic | **Accepted for discussion** — analysis tool | P1 diagnostic |
+| Hadamard / W+A quant / from-scratch laws | **Out** for now | — |
+| Hard trust mask without soft fallback | **Avoid** on conversion (can freeze high-error weights) | — |
+
+Motivation vs our data: D0 median rel_L2 **~0.5**; identity STE; FP-mask hurt → gradient bias on high Q-error entries is a first-class hypothesis (QuEST Eq. 2 style).
+
+---
+
+##### 5.10.1 Soft error-gated STE  ← **ready to spec / implement**
+
+**Problem.** Identity STE sets \(\partial\mathcal{L}/\partial W \approx \partial\mathcal{L}/\partial\widetilde{W}\) even when \(W\) is far from \(Q(W)\). Those coordinates dominate STE dishonesty.
+
+**Existing nearby knob:** `ste_mode=clip` gates on **magnitude** \(|W/\gamma|\le 1\), not on **quantization error**. Different hypothesis.
+
+**Proposed `ste_mode=trust` (soft):**
+
+\[
+e = \frac{|W - Q(W)|}{\gamma+\varepsilon},
+\quad
+T = \tfrac12 \min\bigl(c,\, 1-c\bigr)
+\quad\text{(half min spacing on normalized grid \(\{-1,-c,c,1\}\))},
+\]
+
+\[
+m = \mathrm{clip}\!\bigl(1 - e/(T\cdot s),\, 0,\, 1\bigr),
+\quad
+\frac{\partial\mathcal{L}}{\partial W} \approx m \odot \frac{\partial\mathcal{L}}{\partial\widetilde{W}}.
+\]
+
+| Knob | Default (proposed) | Notes |
+|------|--------------------|--------|
+| `ste_mode` | `trust` for scout; keep `identity` as locked DNA default until PASS | |
+| `trust_softness` \(s\) | **1.0** first; try 1.5 if grads too sparse | \(s\to\infty\) → identity |
+| Hard mask \(m\in\{0,1\}\) | **off** for conversion | QuEST uses HT so hard mask is safer; we don’t |
+
+**Scout protocol (when building):**
+
+| Item | Value |
 |------|--------|
-| **&lt; 49.31** | PASS — fresh long KL with `lora_rank=8` (not polish B) |
-| 49–55 | marginal — optional r=16 once |
-| **≥ 55 / early catastrophe** | R5 null; length floor or paper hygiene; no more adapter stacks |
+| Run ID | `scout_kl_trust_5m` |
+| DNA | match `scout_kl_5m` (no LoRA, no pre_rms, no calib) |
+| Only change | `ste_mode=trust` (+ softness) |
+| Gate | end PPL **&lt; 49.31** |
+| Abort | @λ=1 PPL ≫ 500 |
+| Promote | PASS → fresh long KL with trust STE |
 
-CLI: `--lora-rank`, `--lora-alpha`, `--no-pre-rms`, `--weight-calib none`.
+**Not bundled** with R3/R4/R5. One knob.
+
+---
+
+##### 5.10.2 MSE-optimal scale / grid  — **discussion (no code yet)**
+
+**Problem.** Default `absmean_channel` is simple and conversion-friendly but **not** MSE-optimal for \(Q\) onto \(\mathcal{G}_c\). QuEST fits scale for a Gaussian after RMS; we stay on quaternary \(\{-1,-c,c,1\}\).
+
+**What “MSE-optimal” could mean here**
+
+| Variant | Optimize | Freeze | Pros | Cons |
+|---------|----------|--------|------|------|
+| **A. γ-MSE** | per-channel (or tensor) \(\gamma\) s.t. \(\min_\gamma \|W-\gamma\cdot\mathrm{seg}(W/\gamma)\|^2\) | \(c\) fixed 0.25 | Closest to QuEST scale fit; keeps grid | Need stable solver each step or cached |
+| **B. c-MSE** | global or per-layer \(c\in(0,1)\) | scale = absmean | Attacks codebook mismatch | Changes bin geometry mid-train if online |
+| **C. (γ, c) joint** | both | — | Most expressive | Easy to overfit scout; harder paper claim |
+| **D. Offline fit once** | γ and/or \(c\) on pretrained \(W\) at replace only | then freeze | Cheap; no train-time cost | May go stale as \(W\) moves in QAFT |
+
+**Open decisions (resolve before implement)**
+
+1. **Online vs offline** — Online each forward is closest to QuEST but costly; offline-at-replace + rare refresh is safer for Kaggle.  
+2. **Normalized domain** — Fit after \(W/\mathrm{RMS}\) or \(W/\mathrm{absmean}\)? Absmean matches current codepath; RMS matches QuEST.  
+3. **Interaction with λ-anneal** — Fitting on latent \(W\) while forward uses \(\widetilde{W}\) can disagree early in warmup.  
+4. **vs failed R4** — `unit_absmean` **forces** channel scale to 1 and destroyed pretrained magnitudes. MSE fit must **preserve** a free scale \(\gamma\) that maps codes back to weight units (as \(Q=\gamma\cdot\mathrm{seg}\)).  
+5. **Metric** — Pure weight MSE may not track PPL; gate any scout by **PPL &lt; 49.31**, not only lower rel_L2.  
+6. **Learnable \(c\)** — Overlaps §5.8 D2 `scout_c_learn`; MSE init of \(c\) then freeze is a hybrid.
+
+**Recommended design order (when we implement)**
+
+1. **Offline γ-MSE at replace** (variant A+D) — lowest risk; log Δ rel_L2 vs absmean on shock.  
+2. If shock/rel_L2 improves but PPL scout null → try **periodic refit** (every N steps) still without learning \(c\).  
+3. Only then **c-MSE** or joint, single-knob @ 5M.
+
+**Do not implement** until soft trust scout is decided or queued; do not combine with `unit_absmean`.
+
+---
+
+##### 5.10.3 Gradient alignment diagnostic  — **discussion (no train recipe)**
+
+**Problem.** Weight Q-error (D0) does not prove STE grads are bad. QuEST Fig. 2 measures **gradient alignment** through depth.
+
+**Definition (proposed)**
+
+For a val batch, two forwards from the **same** student weights:
+
+| Path | Forward | Backward |
+|------|---------|----------|
+| **Q** | \(\lambda=1\), quaternary `QuantizedLinear` | current STE (`identity` / `trust` / …) |
+| **FP ref** | same modules but effective \(W\) FP (\(\lambda=0\)) **or** clone without quant | full grad w.r.t. activations/weights |
+
+Alignment at module or block \(\ell\):
+
+\[
+\Xi_\ell
+=
+\frac{
+\langle g^{(\mathrm{Q})}_\ell,\, g^{(\mathrm{FP})}_\ell \rangle
+}{
+\|g^{(\mathrm{Q})}_\ell\|_2\,\|g^{(\mathrm{FP})}_\ell\|_2
+}.
+\]
+
+Report mean \(\Xi\) over a few batches; plot vs depth / role (q,v,mlp).
+
+**Design choices to settle**
+
+| Choice | Options | Lean |
+|--------|---------|------|
+| What is \(g\)? | weight grad on latent \(W\); or activation grad post-block | **Both** if cheap; act-grad matches QuEST Fig. 2 |
+| FP ref | \(\lambda=0\) on student latents vs frozen teacher block | \(\lambda=0\) student isolates STE; teacher compares systems |
+| When | shock (step 0); mid-train; final B ckpt | **B ckpt + shock** first |
+| Cost | 2× backward | analysis job only; few batches |
+
+**How we would use it**
+
+| Pattern | Interpretation | Next |
+|---------|----------------|------|
+| \(\Xi\) high (≥0.8) everywhere | STE OK; bottleneck is representation / data | length, MSE grid, not trust |
+| \(\Xi\) low / drops with depth | STE dishonest (QuEST story) | soft trust scout |
+| \(\Xi\) low only on v_proj etc. | role-sensitive STE | optional role-wise ste_mode later |
+
+**Deliverable (when built):** extend `run_layer_map.py` or `run_grad_align.py` → `grad_align.json` + summary; **no** change to train DNA until trust/MSE scouts need it.
+
+**Not a gate for paper parity** — diagnostic only.
+
+---
+
+##### 5.10.4 Ordering vs other work
+
+```text
+R5 LoRA scout                           §5.9  ✅ PASS 48.38
+        │
+        ├─► fresh heal_kl_lora_50m      ← primary promote
+        │
+        └─ parallel / after:
+              Soft trust STE @ 5M (no LoRA)  §5.10.1  pure quaternary path
+              Grad alignment on B            §5.10.3
+              MSE γ fit (design first)       §5.10.2
+```
+
+Do **not** stack trust + MSE + LoRA in one 5M run.
 
 #### Decision flowchart
 
@@ -465,7 +637,7 @@ Cold re-eval B + layerwise Q-error / scale snapshot   (§5.8 D0)
 |----------------|----------------|
 | 50M too early | **Agree** as hypothesis → D1; polish FAIL ≠ length FAIL |
 | Fixed \(c=0.25\) is #1 bug | **Hypothesis only** → D2 after D0; not proven |
-| STE identity insufficient | Unproven → D3 `clip` later |
+| STE identity insufficient | Open → **§5.10.1 soft trust** (prefer over clip); clip still available |
 | Equal proj sensitivity | Plausible → D0 rank + `scout_skip_qo` |
 | β=0.01 critical | **Weak** (`reg≈0`) → micro-sweep only |
 | KL too weak; try 0.2/0.8 | Static α/T **null @ 5M**; optional α schedule later |
@@ -488,7 +660,11 @@ Cold re-eval B + layerwise Q-error / scale snapshot   (§5.8 D0)
 | α/T scout | PPL **&lt; 49.31** | ⚪ null — lock 0.5/2.0 |
 | D0 layer map | error/sensitivity logged on B | ✅ flat; FP-mask hurt; suggest D1 |
 | Bundle R345 @ 5M | PPL &lt; 49.31 | ❌ FAIL (1000+ @ λ→1) |
-| R5 LoRA @ 5M | PPL **&lt; 49.31** | open (**next**) |
+| R5 LoRA @ 5M | PPL **&lt; 49.31** | ✅ **48.38** — promote long + LoRA |
+| Long KL + LoRA 50M | PPL **&lt; 34.38** | open (**next**) |
+| Soft trust STE @ 5M | PPL **&lt; 49.31** | open — **§5.10.1** |
+| MSE scale/grid | design locked + shock Δrel_L2 | discussion **§5.10.2** |
+| Grad alignment | Ξ logged on B / shock | discussion **§5.10.3** |
 | KL 100M | PPL **&lt; 30** (stretch &lt; 28) | open |
 | D2 rep scout | PPL **&lt; 49.31** @ 5.2M | open |
 | Parity path | after/orig ≲ **1.3** (~23) | open (~1.95) |

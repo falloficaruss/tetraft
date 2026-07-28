@@ -16,12 +16,11 @@ Instructions for coding agents working in this repository.
 
 ## Current focus
 
-**Read `RESULTS.md` §5.8 before changing train recipe.**  
-Best: **`heal_kl_50m` → ~34.38 @ 50M** (after/orig ~1.95); CE `heal_50m` ~43.77; scout_kl ~49.3 @ 5.2M.  
-α/T static scout **null** — lock **0.5/2.0**. Polish on B **FAIL** — do not extend (≠ length FAIL).  
-**Next:** §5.9 **R5-only** `scout_kl_r5_5m` (LoRA r=8; no pre_rms/calib) gate &lt;49.31.  
-Bundle R345 **FAIL** — do not rerun; no R4 `unit_absmean`. D0 flat → not skip_qo.  
-Do not: more polish, more static α/T 5M, BitNet, CE-only marathon, 2B, SFT, Muon — unless asked.
+**Read `RESULTS.md` §5.8–§5.9 before changing train recipe.**  
+Best long: **`heal_kl_50m` → ~34.38 @ 50M** (~1.95×). Best 5M: **`scout_kl_r5_5m` → ~48.38** (LoRA r=8) ✅.  
+**Next:** fresh **long KL + LoRA r=8** (gate &lt;34.38); optional soft trust §5.10.1.  
+α/T null; polish FAIL; bundle R345 FAIL; no R4 `unit_absmean`.  
+Do not: polish B, static α/T, BitNet, CE-only marathon, 2B, SFT, Muon — unless asked.
 
 ## Entry pattern
 
