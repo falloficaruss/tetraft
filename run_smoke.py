@@ -168,6 +168,19 @@ def _parse_args(argv=None):
         default=None,
         help="LoRA alpha (default: equal to rank).",
     )
+    p.add_argument(
+        "--ste-mode",
+        type=str,
+        default=None,
+        choices=["identity", "clip", "trust"],
+        help="STE mode (default from preset/config).",
+    )
+    p.add_argument(
+        "--trust-softness",
+        type=float,
+        default=None,
+        help="Soft trust STE softness s (ste_mode=trust); default 1.0.",
+    )
     return p.parse_args(argv)
 
 
@@ -234,6 +247,10 @@ def _apply_cli_overrides(config: QAFTConfig, args) -> QAFTConfig:
         config.lora_rank = int(args.lora_rank)
     if getattr(args, "lora_alpha", None) is not None:
         config.lora_alpha = float(args.lora_alpha)
+    if getattr(args, "ste_mode", None) is not None:
+        config.ste_mode = args.ste_mode
+    if getattr(args, "trust_softness", None) is not None:
+        config.trust_softness = float(args.trust_softness)
     if args.seed is not None:
         config.seed = args.seed
     return config
@@ -462,6 +479,7 @@ def run_smoke(args=None) -> Dict[str, Any]:
             "seq=%d, batch=%d, accum=%d, λ_warmup=%d, lr_warmup=%d, lr_sched=%s, "
             "min_lr_ratio=%.3f, bf16=%s, 8bit_adam=%s, save_steps=%d, "
             "save_optimizer=%s, skip_linear_attn=%s, c=%.3f, scale_mode=%s, "
+            "ste_mode=%s trust_softness=%.3f, "
             "distill_α=%.3f T=%.2f quant_reg_β=%.4f "
             "pre_rms=%s weight_calib=%s lora_rank=%s resume=%s",
             config.max_steps,
@@ -481,6 +499,8 @@ def run_smoke(args=None) -> Dict[str, Any]:
             config.skip_linear_attn,
             config.quaternary_c,
             config.scale_mode,
+            getattr(config, "ste_mode", "identity"),
+            float(getattr(config, "trust_softness", 1.0)),
             float(getattr(config, "distill_alpha", 1.0)),
             float(getattr(config, "distill_temperature", 2.0)),
             float(getattr(config, "quant_reg_beta", 0.0)),

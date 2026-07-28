@@ -316,13 +316,93 @@ class TestQuantizedLinear:
         w_q = quaternary_quant(layer.weight, layer.c, gamma)
         assert torch.allclose(out, F.linear(x, w_q))
 
+    # ----- STE trust (soft error-gated) -----
+
+    def test_ste_trust_forward_matches_quantized_at_lambda_one(self):
+        """Trust STE must not change forward values vs Q(W) at λ=1 (only grads)."""
+        layer = QuantizedLinear(
+            4, 1, bias=False, c=0.25, ste_mode="trust", trust_softness=1.0,
+            scale_mode="absmean_channel",
+        )
+        with torch.no_grad():
+            layer.weight.data = torch.tensor([[0.1, 0.1, 0.1, 10.0]])
+        layer.lambda_ = 1.0
+        x = torch.ones(1, 4)
+        gamma = compute_scale(layer.weight, "absmean_channel")
+        w_q = quaternary_quant(layer.weight, 0.25, gamma)
+        assert torch.allclose(layer(x), F.linear(x, w_q))
+
+    def test_ste_trust_lambda_zero(self):
+        layer = QuantizedLinear(32, 32, bias=False, c=0.25, ste_mode="trust")
+        layer.lambda_ = 0.0
+        x = torch.randn(4, 32)
+        # Soft mask is float — use allclose (not equal) vs pure FP.
+        assert torch.allclose(layer(x), F.linear(x, layer.weight), atol=1e-5)
+
+    def test_ste_trust_lambda_one(self):
+        layer = QuantizedLinear(32, 32, bias=False, c=0.25, ste_mode="trust")
+        layer.lambda_ = 1.0
+        x = torch.randn(4, 32)
+        ref = F.linear(x, layer.weight)
+        out = layer(x)
+        assert not torch.equal(out, ref)
+        gamma = compute_scale(layer.weight, layer.scale_mode)
+        w_q = quaternary_quant(layer.weight, layer.c, gamma)
+        assert torch.allclose(out, F.linear(x, w_q))
+
+    def test_ste_trust_high_error_smaller_grad(self):
+        """On-grid entries keep full STE grad; high Q-error entries are gated."""
+        c = 0.25
+        layer = QuantizedLinear(
+            2, 1, bias=False, c=c, ste_mode="trust", trust_softness=1.0,
+            scale_mode="absmax_channel",
+        )
+        # γ = max|w| = 1.0; w0=1 → code +1 (e=0); w1=0.5 → code c (e=0.25).
+        # T = ½ min(c,1-c) = 0.125 → m0=1, m1=0.
+        with torch.no_grad():
+            layer.weight.data = torch.tensor([[1.0, 0.5]])
+        layer.lambda_ = 1.0
+        x = torch.ones(1, 2)
+        layer(x).sum().backward()
+        g = layer.weight.grad
+        assert g is not None
+        assert g[0, 0].abs() > 0.0
+        assert g[0, 1].item() == 0.0
+        assert g[0, 0].abs() > g[0, 1].abs()
+
+    def test_ste_trust_large_softness_near_identity(self):
+        """Large s → m≈1 everywhere → grads match identity STE."""
+        torch.manual_seed(1)
+        w0 = torch.randn(8, 8)
+        x = torch.randn(4, 8)
+        id_layer = QuantizedLinear(8, 8, bias=False, c=0.25, ste_mode="identity")
+        tr_layer = QuantizedLinear(
+            8, 8, bias=False, c=0.25, ste_mode="trust", trust_softness=1e6,
+        )
+        with torch.no_grad():
+            id_layer.weight.copy_(w0)
+            tr_layer.weight.copy_(w0)
+        id_layer.lambda_ = tr_layer.lambda_ = 1.0
+        id_layer(x).sum().backward()
+        tr_layer(x).sum().backward()
+        assert torch.allclose(id_layer.weight.grad, tr_layer.weight.grad, atol=1e-3, rtol=1e-3)
+
+    def test_ste_trust_unknown_mode_raises(self):
+        layer = QuantizedLinear(4, 4, bias=False, ste_mode="not_a_mode")
+        with pytest.raises(ValueError, match="ste_mode"):
+            layer(torch.randn(2, 4))
+
     # ----- extra_repr -----
 
     def test_extra_repr_includes_scale_and_ste(self):
-        layer = QuantizedLinear(16, 32, bias=True, c=0.5, scale_mode="absmax_channel", ste_mode="clip")
+        layer = QuantizedLinear(
+            16, 32, bias=True, c=0.5, scale_mode="absmax_channel",
+            ste_mode="trust", trust_softness=1.5,
+        )
         r = layer.extra_repr()
         assert "scale_mode=absmax_channel" in r
-        assert "ste_mode=clip" in r
+        assert "ste_mode=trust" in r
+        assert "trust_softness=1.5" in r
         assert "c=0.5" in r
 
 

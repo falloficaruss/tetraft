@@ -114,9 +114,9 @@ Gradients flow to latent \(W\) through the STE path of \(\widetilde{W}\).
 |------|-----------------|--------|
 | `identity` (default) | \(\partial\mathcal{L}/\partial W \approx \partial\mathcal{L}/\partial\widetilde{W}\) | ✅ implemented |
 | `clip` | \(\partial\mathcal{L}/\partial W \approx (\partial\mathcal{L}/\partial\widetilde{W}) \odot \mathbb{I}(|W/\gamma| \le 1)\) | ✅ implemented |
-| `trust` / soft trust | gate by **quantization error** \(|W-Q(W)|\) (not magnitude) | 📋 planned — `RESULTS.md` §5.10.1 |
+| `trust` / soft trust | gate by **quantization error** \(|W-Q(W)|/\gamma\) (not magnitude) | ✅ implemented — scout `scout_kl_trust_5m` |
 
-**Soft trust (planned).** Let \(e = |W - Q(W)|\) (or normalized \(e/\gamma\)). With threshold \(T\) (e.g. half bin width in the normalized domain) and softness \(s>0\):
+**Soft trust.** Normalized error \(e = |W - Q(W)|/(\gamma+\varepsilon)\). Threshold \(T = \tfrac12\min(c,\,1-c)\) (half min spacing on \(\{-1,-c,c,1\}\)) and softness \(s>0\) (`trust_softness`, default 1.0):
 
 \[
 m = \mathrm{clip}\!\left(1 - \frac{e}{T\cdot s},\, 0,\, 1\right),
@@ -126,7 +126,7 @@ m = \mathrm{clip}\!\left(1 - \frac{e}{T\cdot s},\, 0,\, 1\right),
 m \odot \frac{\partial\mathcal{L}}{\partial\widetilde{W}}.
 \]
 
-Hard trust (\(s\to 1\), binary \(m=\mathbb{I}(e\le T)\)) can starve high-error entries of gradient under conversion QAFT — **prefer soft**. Inspired by QuEST trust estimation (ICML 2025); we do **not** adopt their full W+A / from-scratch stack. Choose by recovery on 0.8B.
+Forward is unchanged (mask applied only on the STE path). \(s\to\infty\) → identity. Hard trust (binary \(m=\mathbb{I}(e\le T)\)) can starve high-error entries under conversion QAFT — **prefer soft**. Inspired by QuEST trust estimation (ICML 2025); we do **not** adopt their full W+A / from-scratch stack. Choose by recovery on 0.8B (`RESULTS.md` §5.10.1).
 
 ---
 
@@ -231,7 +231,7 @@ All Phase-0 code debt resolved (see `RESEARCH_PLAN.md`):
 |------------------|-------------|
 | Default `absmean_channel` | ✅ `compute_scale()` dispatches 4 modes; default `absmean_channel` |
 | Default `c=0.25` everywhere | ✅ Unified default `c=0.25` in `config.py`, `quantize.py`, `model.py` |
-| STE `identity` + optional `clip` | ✅ `ste_mode` flag in `QuantizedLinear.__init__`; both modes implemented |
+| STE `identity` + optional `clip` / `trust` | ✅ `ste_mode` + `trust_softness`; soft trust §3.2 implemented |
 | Selective module policy | ✅ Vision/MTP skip patterns, replace report with `%` quantized |
 | `config.py` model target | ✅ Default `Qwen/Qwen3.5-0.8B-Base` with `scale_mode`, `ste_mode`, `quant_warmup_steps` |
 | λ anneal | ✅ Config-driven `quant_warmup_steps`; formula `min(1, step/warmup)` matches §3.1 |

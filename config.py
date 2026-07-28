@@ -10,7 +10,9 @@ class QAFTConfig:
 
     # Quantization
     scale_mode: Literal["absmean_channel", "absmean_tensor", "absmax_channel", "absmax_tensor"] = "absmean_channel"
-    ste_mode: Literal["identity", "clip"] = "identity"
+    ste_mode: Literal["identity", "clip", "trust"] = "identity"
+    # Soft trust STE (ste_mode=trust): m = clip(1 - e/(T*s), 0, 1); s→∞ → identity
+    trust_softness: float = 1.0
     quant_warmup_steps: int = 1000  # λ ramps from 0 → 1 over this many steps; 0 = hard quant from step 0
 
     # Recovery objective (α=1, β=0 → pure CE, backward-compatible)
@@ -273,6 +275,54 @@ SMOKE_PRESETS: Dict[str, dict] = {
         "weight_calib": "none",
         "lora_rank": 8,
         "lora_alpha": 8.0,
+    },
+    # Soft trust STE @ ~5.24M (RESULTS.md §5.10.1). Match scout_kl_5m DNA;
+    # only change ste_mode=trust. Gate: end PPL < best 5M (scout_kl_r5_5m ~48.38).
+    # No LoRA / pre_rms / calib. Abort @λ=1 PPL ≫ 500.
+    "scout_kl_trust_5m": {
+        "max_steps": 1280,
+        "quant_warmup_steps": 256,
+        "warmup_steps": 128,
+        "logging_steps": 40,
+        "eval_steps": 256,
+        "save_steps": 0,
+        "learning_rate": 2e-4,
+        "lr_scheduler_type": "linear",
+        "min_lr_ratio": 0.0,
+        "skip_linear_attn": True,
+        "quaternary_c": 0.25,
+        "distill_alpha": 0.5,
+        "distill_temperature": 2.0,
+        "quant_reg_beta": 0.01,
+        "ste_mode": "trust",
+        "trust_softness": 1.0,
+        "pre_rms": False,
+        "weight_calib": "none",
+        "lora_rank": 0,
+    },
+    # Trust + more teacher KL (α=0.3). Confounds two knobs vs pure trust;
+    # use when chasing best 5M PPL rather than clean STE attribution.
+    # Gate still < 48.38. T stays 2.0 (locked).
+    "scout_kl_trust_a03_5m": {
+        "max_steps": 1280,
+        "quant_warmup_steps": 256,
+        "warmup_steps": 128,
+        "logging_steps": 40,
+        "eval_steps": 256,
+        "save_steps": 0,
+        "learning_rate": 2e-4,
+        "lr_scheduler_type": "linear",
+        "min_lr_ratio": 0.0,
+        "skip_linear_attn": True,
+        "quaternary_c": 0.25,
+        "distill_alpha": 0.3,
+        "distill_temperature": 2.0,
+        "quant_reg_beta": 0.01,
+        "ste_mode": "trust",
+        "trust_softness": 1.0,
+        "pre_rms": False,
+        "weight_calib": "none",
+        "lora_rank": 0,
     },
     # Polish from heal_kl_50m B weights (~5.24M more tokens). Weights-only resume
     # rebuilds Adam+sched from 0; schedule_max_steps = polish length (not 13487).

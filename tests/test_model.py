@@ -321,6 +321,19 @@ class TestReplaceLinearLayers:
         assert isinstance(model.lm_head, nn.Linear)
         assert not isinstance(model.lm_head, QuantizedLinear)
 
+    def test_replace_from_config_passes_trust(self):
+        model = _DummyModel(d=32)
+        cfg = QAFTConfig(
+            ste_mode="trust",
+            trust_softness=1.5,
+            skip_lm_head=True,
+        )
+        replace_from_config(model, cfg, verbose=False)
+        for layer in model.layers:
+            assert isinstance(layer.q_proj, QuantizedLinear)
+            assert layer.q_proj.ste_mode == "trust"
+            assert layer.q_proj.trust_softness == 1.5
+
     # ----- Linear inventory / lambda helper -----
 
     def test_dump_linear_inventory(self):

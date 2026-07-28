@@ -16,9 +16,9 @@ Instructions for coding agents working in this repository.
 
 ## Current focus
 
-**Read `RESULTS.md` §5.8–§5.9 before changing train recipe.**  
+**Read `RESULTS.md` §5.8–§5.10 before changing train recipe.**  
 Best long: **`heal_kl_50m` → ~34.38 @ 50M** (~1.95×). Best 5M: **`scout_kl_r5_5m` → ~48.38** (LoRA r=8) ✅.  
-**Next:** fresh **long KL + LoRA r=8** (gate &lt;34.38); optional soft trust §5.10.1.  
+**Next 5M scouts first** (before 50M): **`scout_kl_trust_5m`** soft trust STE (gate &lt;**48.38**). Then long KL + LoRA.  
 α/T null; polish FAIL; bundle R345 FAIL; no R4 `unit_absmean`.  
 Do not: polish B, static α/T, BitNet, CE-only marathon, 2B, SFT, Muon — unless asked.
 
@@ -53,7 +53,7 @@ Files are **flat at root** (no package dir) — required for Kaggle Dataset flat
 
 - **Grid:** `{-1, -c, c, 1}`, default **`c=0.25`**
 - **Scale default:** `absmean_channel` (per `RESEARCH.md`); ablations via config
-- **STE:** identity first; optional clip mode
+- **STE:** identity default; optional `clip` / soft `trust` (`trust_softness`)
 - **\(\lambda\) anneal:** supported; trainer may ramp 0→1
 - **Skip:** `lm_head`, embeddings, vision, norms; optional `skip_linear_attn` (Qwen3.5 GDN path `linear_attn`)
 - **First model:** `Qwen/Qwen3.5-0.8B-Base` then `Qwen3.5-2B-Base`

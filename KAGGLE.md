@@ -64,20 +64,36 @@ Replay (if needed): notebook `SESSION=A|B`; see `RESULTS.md` §2.6.
 | **D0 layer map** | `run_layer_map.py` on B | role table | ✅ done |
 | **Bundle R345** | R3+R4+R5 | &lt; 49.31 | ❌ FAIL |
 | **R5-only** | `scout_kl_r5_5m` | &lt; 49.31 | ✅ **48.38** |
-| **Long KL + LoRA** | heal_kl DNA + lora_rank=8 @ 50M | &lt; **34.38** | **next** |
-| Soft trust STE | §5.10.1 @ 5M | &lt; 49.31 | optional pure path |
+| **Soft trust STE** | `scout_kl_trust_5m` §5.10.1 | &lt; **48.38** | **next 5M scout** |
+| **Long KL + LoRA** | heal_kl DNA + lora_rank=8 @ 50M | &lt; **34.38** | after 5M scouts |
 | α/T / polish | — | — | null / FAIL |
 
 ### D.0b R5-only scout ✅ done
 
 End PPL **48.38** (gate 49.31). Curve: 117→95→71→61→**48.4**. Adapters ~3.2M.  
-**Do not** re-run scout unless ablating rank. **Next:** long KL with LoRA (preset TBD `heal_kl_lora_50m`).
+**Do not** re-run scout unless ablating rank.
+
+### D.0c Soft trust STE scout ← **run this (5M first)**
+
+Gate end PPL **&lt; 48.38** (beat best 5M / R5). Abort if @λ=1 PPL ≫ 500. No LoRA.
+
+| Preset | Knobs | Use when |
+|--------|-------|----------|
+| `scout_kl_trust_5m` | trust only (α=0.5 T=2) | clean STE attribution |
+| **`scout_kl_trust_a03_5m`** | trust + **α=0.3** T=2 | chase best 5M (more teacher) |
 
 ```bash
-# Replay only
-python run_smoke.py --preset scout_kl_r5_5m \
-  --train-data ... --val-data ... \
-  --output-dir /kaggle/working/checkpoints_scout_kl_r5_5m
+# Prefer for best-PPL try (α=0.3 was slightly better historically)
+python run_smoke.py --preset scout_kl_trust_a03_5m \
+  --train-data /kaggle/input/tetraft-fineweb-edu-50m/train.jsonl \
+  --val-data /kaggle/input/tetraft-fineweb-edu-50m/val.jsonl \
+  --output-dir /kaggle/working/checkpoints_scout_kl_trust_a03_5m
+
+# One-knob STE control (same DNA as scout_kl_5m + trust)
+python run_smoke.py --preset scout_kl_trust_5m \
+  --train-data /kaggle/input/tetraft-fineweb-edu-50m/train.jsonl \
+  --val-data /kaggle/input/tetraft-fineweb-edu-50m/val.jsonl \
+  --output-dir /kaggle/working/checkpoints_scout_kl_trust_5m
 ```
 
 ### D.1 D0 layer map ← **run this**

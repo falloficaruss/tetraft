@@ -130,6 +130,8 @@ class TestSmokePresets:
             "heal_kl_50m",
             "scout_kl_bundle_r345_5m",
             "scout_kl_r5_5m",
+            "scout_kl_trust_5m",
+            "scout_kl_trust_a03_5m",
             "polish_kl_5m",
             "scale_25m",
             "scale_50m",
@@ -190,6 +192,32 @@ class TestSmokePresets:
         assert cfg.lora_alpha == 8.0
         assert cfg.quaternary_c == 0.25
         assert cfg.quant_warmup_steps == 256
+
+    def test_scout_kl_trust_5m_preset(self):
+        cfg = apply_smoke_preset(QAFTConfig(), "scout_kl_trust_5m")
+        assert cfg.max_steps == 1280
+        assert cfg.tokens_budget() == 1280 * 4096
+        assert cfg.distill_alpha == 0.5
+        assert cfg.distill_temperature == 2.0
+        assert cfg.quant_reg_beta == 0.01
+        assert cfg.skip_linear_attn is True
+        assert cfg.ste_mode == "trust"
+        assert cfg.trust_softness == 1.0
+        assert cfg.lora_rank == 0
+        assert cfg.pre_rms is False
+        assert cfg.weight_calib == "none"
+        assert cfg.quaternary_c == 0.25
+        assert cfg.quant_warmup_steps == 256
+
+    def test_scout_kl_trust_a03_5m_preset(self):
+        cfg = apply_smoke_preset(QAFTConfig(), "scout_kl_trust_a03_5m")
+        assert cfg.max_steps == 1280
+        assert cfg.ste_mode == "trust"
+        assert cfg.trust_softness == 1.0
+        assert cfg.distill_alpha == 0.3
+        assert cfg.distill_temperature == 2.0
+        assert cfg.lora_rank == 0
+        assert cfg.skip_linear_attn is True
 
     def test_polish_kl_5m_preset(self):
         cfg = apply_smoke_preset(QAFTConfig(), "polish_kl_5m")

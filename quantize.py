@@ -135,6 +135,7 @@ class QuantizedLinear(nn.Module):
         c: float = 0.25,
         scale_mode: str = "absmean_channel",
         ste_mode: str = "identity",
+        trust_softness: float = 1.0,
         pre_rms: bool = False,
         lora_rank: int = 0,
         lora_alpha: Optional[float] = None,
@@ -145,6 +146,7 @@ class QuantizedLinear(nn.Module):
         self.c = c
         self.scale_mode = scale_mode
         self.ste_mode = ste_mode
+        self.trust_softness = float(trust_softness)
         self.lambda_ = 1.0  # can be overridden by the trainer
         self.pre_rms_enabled = bool(pre_rms)
         self.lora_rank = int(lora_rank) if lora_rank else 0
@@ -187,13 +189,22 @@ class QuantizedLinear(nn.Module):
     def _effective_weight(self) -> torch.Tensor:
         gamma = compute_scale(self.weight, self.scale_mode)
         w_q = quaternary_quant(self.weight, self.c, gamma)
-        # Forward value: (1-λ)W + λ Q(W). Backward: identity STE through W.
+        # Forward value: (1-λ)W + λ Q(W). Backward: STE through W (mode-gated).
         w_eff = self.weight + self.lambda_ * (w_q - self.weight).detach()
         if self.ste_mode == "identity":
             pass
         elif self.ste_mode == "clip":
             mask = (self.weight.detach() / gamma).abs() <= 1.0
             w_eff = w_eff * mask + w_eff.detach() * (~mask)
+        elif self.ste_mode == "trust":
+            # Soft error-gated STE (RESULTS.md §5.10.1): m = clip(1 - e/(T*s), 0, 1)
+            # with e = |W-Q(W)|/γ, T = ½ min(c, 1-c). Forward unchanged.
+            c = float(self.c)
+            t = 0.5 * min(c, 1.0 - c)
+            s = max(float(self.trust_softness), _EPS)
+            e = (self.weight.detach() - w_q.detach()).abs() / (gamma + _EPS)
+            m = (1.0 - e / (t * s + _EPS)).clamp(0.0, 1.0)
+            w_eff = w_eff * m + w_eff.detach() * (1.0 - m)
         else:
             raise ValueError(f"Unknown ste_mode: {self.ste_mode}")
         return w_eff
@@ -218,6 +229,7 @@ class QuantizedLinear(nn.Module):
             f"in_features={self.in_features}, out_features={self.out_features}, "
             f"bias={self.bias is not None}, c={self.c}, "
             f"scale_mode={self.scale_mode}, ste_mode={self.ste_mode}, "
+            f"trust_softness={self.trust_softness}, "
             f"pre_rms={self.pre_rms_enabled}, lora_rank={self.lora_rank}"
         )
 

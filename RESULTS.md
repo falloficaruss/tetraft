@@ -233,8 +233,8 @@ Still far from KL-50M **34.38** (10× tokens) — promote via **fresh long KL + 
 
 **A. Now (ordered)**  
 1. ~~§5.8 D0~~ ✅ flat error; FP-mask hurt. ~~R5 scout~~ ✅ **48.38**.  
-2. **Fresh long KL + LoRA r=8** (`heal_kl_lora_50m` TBD) — gate &lt; **34.38**.  
-3. Optional: §5.10.1 soft trust @ 5M (pure quaternary); §5.8 D1 length without LoRA.
+2. **§5.10.1 soft trust @ 5M** (`scout_kl_trust_5m`) — gate &lt; **48.38** (beat best 5M).  
+3. Other 5M scouts as needed; then **fresh long KL + LoRA r=8** — gate &lt; **34.38**.
 
 **B. Paper hygiene (cheap, parallel)**  
 1. **FP continued-pretrain control** — same FineWeb, ~25–50M tokens, **no quant**.  
@@ -245,7 +245,7 @@ Still far from KL-50M **34.38** (10× tokens) — promote via **fresh long KL + 
 2. ~~§5.4 static α/T as main lever~~ — **null @ 5M**; keep α=0.5 T=2.0.
 
 **D. Later / optional**  
-**§5.10** soft trust STE (P0 QuEST import); MSE scale/grid + grad alignment (discussion); α schedule; longer λ; STE `clip`; β micro-sweep; GDN+KL; Muon §5.7; 2-bit pack.
+MSE scale/grid + grad alignment (discussion §5.10.2–3); α schedule; longer λ; STE `clip`; β micro-sweep; GDN+KL; Muon §5.7; 2-bit pack.
 
 **E. Deprioritize**  
 More polish on B, CE-only longer, BitNet baselines, chat SFT, 2B, free-form “extra RMSNorm everywhere” without D0 — until gap ≲1.5×.
@@ -474,13 +474,13 @@ Motivation vs our data: D0 median rel_L2 **~0.5**; identity STE; FP-mask hurt �
 
 ---
 
-##### 5.10.1 Soft error-gated STE  ← **ready to spec / implement**
+##### 5.10.1 Soft error-gated STE  ← **implemented; run scout**
 
 **Problem.** Identity STE sets \(\partial\mathcal{L}/\partial W \approx \partial\mathcal{L}/\partial\widetilde{W}\) even when \(W\) is far from \(Q(W)\). Those coordinates dominate STE dishonesty.
 
 **Existing nearby knob:** `ste_mode=clip` gates on **magnitude** \(|W/\gamma|\le 1\), not on **quantization error**. Different hypothesis.
 
-**Proposed `ste_mode=trust` (soft):**
+**`ste_mode=trust` (soft)** — in `QuantizedLinear`:
 
 \[
 e = \frac{|W - Q(W)|}{\gamma+\varepsilon},
@@ -495,24 +495,31 @@ m = \mathrm{clip}\!\bigl(1 - e/(T\cdot s),\, 0,\, 1\bigr),
 \frac{\partial\mathcal{L}}{\partial W} \approx m \odot \frac{\partial\mathcal{L}}{\partial\widetilde{W}}.
 \]
 
-| Knob | Default (proposed) | Notes |
-|------|--------------------|--------|
-| `ste_mode` | `trust` for scout; keep `identity` as locked DNA default until PASS | |
+| Knob | Default | Notes |
+|------|---------|--------|
+| `ste_mode` | `trust` for scout; `identity` locked DNA default until PASS | |
 | `trust_softness` \(s\) | **1.0** first; try 1.5 if grads too sparse | \(s\to\infty\) → identity |
 | Hard mask \(m\in\{0,1\}\) | **off** for conversion | QuEST uses HT so hard mask is safer; we don’t |
 
-**Scout protocol (when building):**
+**Scout protocol:**
 
 | Item | Value |
 |------|--------|
-| Run ID | `scout_kl_trust_5m` |
-| DNA | match `scout_kl_5m` (no LoRA, no pre_rms, no calib) |
-| Only change | `ste_mode=trust` (+ softness) |
-| Gate | end PPL **&lt; 49.31** |
+| Run ID (clean) | `scout_kl_trust_5m` — trust only, α=0.5 T=2 |
+| Run ID (chase) | `scout_kl_trust_a03_5m` — trust + **α=0.3** T=2 |
+| DNA base | match `scout_kl_5m` (no LoRA, no pre_rms, no calib) |
+| STE | `ste_mode=trust`, `trust_softness=1.0` |
+| Gate | end PPL **&lt; 48.38** (beat best 5M = R5 LoRA) |
 | Abort | @λ=1 PPL ≫ 500 |
-| Promote | PASS → fresh long KL with trust STE |
+| Promote | PASS → consider long KL with winning α+trust; finish other 5M scouts before 50M |
 
-**Not bundled** with R3/R4/R5. One knob.
+**Not bundled** with R3/R4/R5. Prefer **a03** if chasing PPL (α=0.3 was slightly better historically); pure trust if you need clean STE attribution.
+
+```bash
+python run_smoke.py --preset scout_kl_trust_a03_5m \
+  --train-data ... --val-data ... \
+  --output-dir /kaggle/working/checkpoints_scout_kl_trust_a03_5m
+```
 
 ---
 
@@ -603,10 +610,10 @@ Report mean \(\Xi\) over a few batches; plot vs depth / role (q,v,mlp).
 ```text
 R5 LoRA scout                           §5.9  ✅ PASS 48.38
         │
-        ├─► fresh heal_kl_lora_50m      ← primary promote
+        ├─► Soft trust STE @ 5M (no LoRA)  §5.10.1  ← run now; gate <48.38
         │
-        └─ parallel / after:
-              Soft trust STE @ 5M (no LoRA)  §5.10.1  pure quaternary path
+        └─ after 5M scouts:
+              fresh heal_kl_lora_50m         gate <34.38
               Grad alignment on B            §5.10.3
               MSE γ fit (design first)       §5.10.2
 ```
@@ -662,7 +669,7 @@ Cold re-eval B + layerwise Q-error / scale snapshot   (§5.8 D0)
 | Bundle R345 @ 5M | PPL &lt; 49.31 | ❌ FAIL (1000+ @ λ→1) |
 | R5 LoRA @ 5M | PPL **&lt; 49.31** | ✅ **48.38** — promote long + LoRA |
 | Long KL + LoRA 50M | PPL **&lt; 34.38** | open (**next**) |
-| Soft trust STE @ 5M | PPL **&lt; 49.31** | open — **§5.10.1** |
+| Soft trust STE @ 5M | PPL **&lt; 48.38** (beat R5) | open — **`scout_kl_trust_5m`** |
 | MSE scale/grid | design locked + shock Δrel_L2 | discussion **§5.10.2** |
 | Grad alignment | Ξ logged on B / shock | discussion **§5.10.3** |
 | KL 100M | PPL **&lt; 30** (stretch &lt; 28) | open |
