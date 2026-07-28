@@ -399,35 +399,47 @@ Promote winner only via **fresh** long KL — do not only re-polish B.
 
 More polish-on-B · CE-only marathon · BitNet competitor runs · 2B · chat SFT · Muon before recipe settle · “RMSNorm everywhere” without D0 · more static α/T 5M cells
 
-#### §5.9 Bundle scout R3+R4+R5 @ 5.2M  ← **optional next smoke**
+#### §5.9 Adapter scouts @ 5.2M
 
-**Goal:** Beat **`scout_kl_5m` ~49.31** with one combined adapter stack (attribution only if PASS).
+##### Bundle R3+R4+R5  ❌ **FAIL — stop**
 
-| Piece | Config | Init |
-|-------|--------|------|
-| R3 pre-RMS | `pre_rms=True` | γ=**1** on each `QuantizedLinear` input |
-| R4 calib | `weight_calib=unit_absmean` | one-shot at replace |
-| R5 LoRA | `lora_rank=8`, `lora_alpha=8` | **B=0** (identity residual) |
+Preset `scout_kl_bundle_r345_5m`. Mid-run PPL **≫1000** at λ→1 (~step 256); stopped early.  
+**Suspected:** R4 `unit_absmean` (destroys pretrained channel scales). Do **not** rerun bundle or R4-as-is.
+
+##### R5-only LoRA  ← **next smoke**
+
+**Goal:** Beat **`scout_kl_5m` ~49.31** with LoRA residual only (ApiQ-style; B=0 init).
 
 | Knob | Value |
 |------|--------|
-| Preset | **`scout_kl_bundle_r345_5m`** |
+| Preset | **`scout_kl_r5_5m`** |
 | Base DNA | skip GDN, λw=256, linear→0, lr 2e-4, α=0.5 T=2 β=0.01, c=0.25 |
+| R3 / R4 | **off** (`pre_rms=False`, `weight_calib=none`) |
+| R5 | `lora_rank=8`, `lora_alpha=8` |
 | Gate | end PPL **&lt; 49.31** (20-batch) |
-| Claim note | hybrid quaternary **+ adapters** (report LoRA/pre_rms param count) |
+| Claim note | hybrid quaternary **+ LoRA** (not pure weight-only 2-bit) |
 
 ```bash
-python run_smoke.py --preset scout_kl_bundle_r345_5m \
+python run_smoke.py --preset scout_kl_r5_5m \
   --train-data ... --val-data ... \
-  --output-dir /kaggle/working/checkpoints_scout_kl_bundle_r345_5m
+  --output-dir /kaggle/working/checkpoints_scout_kl_r5_5m
 ```
+
+Notebook: `SESSION = "R5"`. Fresh start; code + FineWeb only.
+
+| Check | Expect |
+|--------|--------|
+| Log | `pre_rms=False weight_calib=none lora_rank=8` |
+| @ λ→1 (~256) | PPL ~100–170 class like scout_kl — **abort if ≫500** |
+| End | &lt; **49.31** PASS → fresh long KL **with** LoRA; else R5 null @ 5M |
 
 | Gate | Action |
 |------|--------|
-| **&lt; 49.31** | Leave-one-out @ 5M (`--no-pre-rms` / `--weight-calib none` / `--lora-rank 0`) before long KL |
-| **≥ 49.31** | Bundle null @ 5M; try single-knob R5 or R3; do not promote bundle to 100M |
+| **&lt; 49.31** | PASS — fresh long KL with `lora_rank=8` (not polish B) |
+| 49–55 | marginal — optional r=16 once |
+| **≥ 55 / early catastrophe** | R5 null; length floor or paper hygiene; no more adapter stacks |
 
-CLI overrides: `--pre-rms` / `--no-pre-rms`, `--weight-calib none|unit_absmean`, `--lora-rank`, `--lora-alpha`.
+CLI: `--lora-rank`, `--lora-alpha`, `--no-pre-rms`, `--weight-calib none`.
 
 #### Decision flowchart
 
@@ -474,7 +486,9 @@ Cold re-eval B + layerwise Q-error / scale snapshot   (§5.8 D0)
 | KL strong | PPL **≲ 35** | ✅ **~34.38** |
 | Polish +5M @ 2e-5 | PPL **&lt; 34.38** | ❌ FAIL — stop polish |
 | α/T scout | PPL **&lt; 49.31** | ⚪ null — lock 0.5/2.0 |
-| D0 layer map | error/sensitivity logged on B | open (**next**) |
+| D0 layer map | error/sensitivity logged on B | ✅ flat; FP-mask hurt; suggest D1 |
+| Bundle R345 @ 5M | PPL &lt; 49.31 | ❌ FAIL (1000+ @ λ→1) |
+| R5 LoRA @ 5M | PPL **&lt; 49.31** | open (**next**) |
 | KL 100M | PPL **&lt; 30** (stretch &lt; 28) | open |
 | D2 rep scout | PPL **&lt; 49.31** @ 5.2M | open |
 | Parity path | after/orig ≲ **1.3** (~23) | open (~1.95) |

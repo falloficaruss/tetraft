@@ -231,8 +231,8 @@ SMOKE_PRESETS: Dict[str, dict] = {
         "distill_temperature": 2.0,
         "quant_reg_beta": 0.01,
     },
-    # Bundle smoke R3+R4+R5 @ ~5.24M (gate < scout_kl_5m ~49.31). Fresh start.
-    # If PASS: leave-one-out ablations before long KL. If FAIL: try single-knob R5/R3.
+    # Bundle smoke R3+R4+R5 @ ~5.24M — ❌ FAIL (PPL 1000+ @ λ→1; do not rerun).
+    # Suspected R4 unit_absmean. Kept for replay only.
     "scout_kl_bundle_r345_5m": {
         "max_steps": 1280,
         "quant_warmup_steps": 256,
@@ -250,6 +250,27 @@ SMOKE_PRESETS: Dict[str, dict] = {
         "quant_reg_beta": 0.01,
         "pre_rms": True,
         "weight_calib": "unit_absmean",
+        "lora_rank": 8,
+        "lora_alpha": 8.0,
+    },
+    # R5-only @ ~5.24M (gate < scout_kl_5m ~49.31). Fresh start. No R3/R4.
+    "scout_kl_r5_5m": {
+        "max_steps": 1280,
+        "quant_warmup_steps": 256,
+        "warmup_steps": 128,
+        "logging_steps": 40,
+        "eval_steps": 256,
+        "save_steps": 0,
+        "learning_rate": 2e-4,
+        "lr_scheduler_type": "linear",
+        "min_lr_ratio": 0.0,
+        "skip_linear_attn": True,
+        "quaternary_c": 0.25,
+        "distill_alpha": 0.5,
+        "distill_temperature": 2.0,
+        "quant_reg_beta": 0.01,
+        "pre_rms": False,
+        "weight_calib": "none",
         "lora_rank": 8,
         "lora_alpha": 8.0,
     },

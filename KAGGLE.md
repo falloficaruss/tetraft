@@ -57,17 +57,29 @@ Defaults: weights-only best/final; `save_steps=0`.
 
 Replay (if needed): notebook `SESSION=A|B`; see `RESULTS.md` §2.6.
 
-**Next science:** `RESULTS.md` §5.8 **D0** layer map → D1 `heal_kl_100m` / D2 rep scouts.  
-α/T §5.4 **null** — lock 0.5/2.0. Polish §5.5 **FAIL** — stop. Muon §5.7 future only.
+**Next science:** `RESULTS.md` §5.9 **R5-only** LoRA scout.  
+α/T null; polish FAIL; bundle R345 FAIL; D0 done (flat).
 
 | Option | What | Gate | Status |
 |--------|------|------|--------|
-| **D0 layer map** | `run_layer_map.py` on B ckpt | role table + suggest | ✅ done (flat; suggest D1) |
-| **Bundle R345** | `scout_kl_bundle_r345_5m` | &lt; **49.31** | **next smoke** |
-| **D1 KL 100M** | fresh `heal_kl_100m` | &lt; **30** | length floor / after bundle |
-| **D2 rep scout** | single-knob if bundle null | &lt; **49.31** | after bundle FAIL |
-| α/T scout | static α/T @ 5M | &lt; 49.31 | ⚪ null — stop |
+| **D0 layer map** | `run_layer_map.py` on B | role table | ✅ done |
+| **Bundle R345** | R3+R4+R5 | &lt; 49.31 | ❌ FAIL — stop |
+| **R5-only** | `scout_kl_r5_5m` LoRA r=8 | &lt; **49.31** | **next** |
+| **D1 KL 100M** | fresh same DNA | &lt; **30** | length floor |
+| α/T scout | static α/T @ 5M | &lt; 49.31 | ⚪ null |
 | polish | `polish_kl_5m` | &lt; 34.38 | **FAIL** |
+
+### D.0b R5-only scout ← **run this**
+
+Attach **code + FineWeb only**. Refresh `tetraft-code`. Notebook `SESSION="R5"`.
+
+```bash
+python run_smoke.py --preset scout_kl_r5_5m \
+  --train-data ... --val-data ... \
+  --output-dir /kaggle/working/checkpoints_scout_kl_r5_5m
+```
+
+Sanity: log `pre_rms=False weight_calib=none lora_rank=8`; @λ=1 PPL not ≫500. Gate end &lt; **49.31**.
 
 ### D.1 D0 layer map ← **run this**
 

@@ -19,7 +19,8 @@ Instructions for coding agents working in this repository.
 **Read `RESULTS.md` §5.8 before changing train recipe.**  
 Best: **`heal_kl_50m` → ~34.38 @ 50M** (after/orig ~1.95); CE `heal_50m` ~43.77; scout_kl ~49.3 @ 5.2M.  
 α/T static scout **null** — lock **0.5/2.0**. Polish on B **FAIL** — do not extend (≠ length FAIL).  
-**Next:** D0 done on B (flat error → not skip_qo). Optional **§5.9 bundle** `scout_kl_bundle_r345_5m` (R3 pre_rms + R4 unit_absmean + R5 LoRA r=8) gate &lt;49.31; else D1/D2.  
+**Next:** §5.9 **R5-only** `scout_kl_r5_5m` (LoRA r=8; no pre_rms/calib) gate &lt;49.31.  
+Bundle R345 **FAIL** — do not rerun; no R4 `unit_absmean`. D0 flat → not skip_qo.  
 Do not: more polish, more static α/T 5M, BitNet, CE-only marathon, 2B, SFT, Muon — unless asked.
 
 ## Entry pattern

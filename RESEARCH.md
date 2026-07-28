@@ -177,7 +177,8 @@ Config knobs on `QuantizedLinear` / replace (defaults preserve baseline):
 | `weight_calib` | `none` | At replace: `unit_absmean` divides each out-channel by its absmean |
 | `lora_rank` / `lora_alpha` | `0` / `None` | Residual LoRA: \(y \mathrel{+}= (\alpha/r)\,x A^\top B^\top\); **B=0** init |
 
-Preset `scout_kl_bundle_r345_5m` enables all three. Report adapter param count; not pure weight-only quaternary when on.
+Preset `scout_kl_bundle_r345_5m` enables all three (**FAIL** in practice — do not default).  
+Prefer single-knob `scout_kl_r5_5m` (LoRA only). Report adapter param count; not pure weight-only quaternary when on.
 
 ---
 
