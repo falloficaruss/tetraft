@@ -132,6 +132,7 @@ class TestSmokePresets:
             "scout_kl_r5_5m",
             "scout_kl_trust_5m",
             "scout_kl_trust_a03_5m",
+            "heal_kl_trust_400m",
             "polish_kl_5m",
             "scale_25m",
             "scale_50m",
@@ -218,6 +219,26 @@ class TestSmokePresets:
         assert cfg.distill_temperature == 2.0
         assert cfg.lora_rank == 0
         assert cfg.skip_linear_attn is True
+
+    def test_heal_kl_trust_400m_preset(self):
+        cfg = apply_smoke_preset(QAFTConfig(), "heal_kl_trust_400m")
+        assert cfg.max_steps == 97664
+        assert cfg.schedule_max_steps == 97664
+        assert cfg.schedule_horizon_steps() == 97664
+        assert cfg.tokens_budget() == 97664 * 4096
+        assert cfg.ste_mode == "trust"
+        assert cfg.trust_softness == 1.0
+        assert cfg.distill_alpha == 0.3
+        assert cfg.distill_temperature == 2.0
+        assert cfg.quant_reg_beta == 0.01
+        assert cfg.skip_linear_attn is True
+        assert cfg.lora_rank == 0
+        assert cfg.lr_scheduler_type == "cosine"
+        assert cfg.min_lr_ratio == 0.1
+        assert cfg.save_optimizer is True
+        # Session-1 early stop keeps full cosine horizon
+        cfg.max_steps = 6104
+        assert cfg.schedule_horizon_steps() == 97664
 
     def test_polish_kl_5m_preset(self):
         cfg = apply_smoke_preset(QAFTConfig(), "polish_kl_5m")

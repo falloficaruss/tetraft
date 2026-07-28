@@ -166,6 +166,23 @@ Shock A: **17839** (matches skip-GDN). Inventory: 96 eligible / **41%** quantize
 
 Interrupted ~21M for disk (full opt dumps). End ~68.6. Obsolete vs heal DNA.
 
+### 2.8b `scout_kl_trust_a03_5m` (~5.24M) ✅ **best 5M (pure quaternary + trust)**
+
+Kaggle 2026-07-28. Preset `scout_kl_trust_a03_5m`: KL DNA + **`ste_mode=trust`** s=1.0 + **α=0.3** T=2 (no LoRA).  
+Shock **17881**; inventory 96 eligible / 41% Q. Orig **17.67**.
+
+| Step | ≈ tokens | PPL |
+|-----:|---------:|----:|
+| 256 (λ→1) | ~1.0M | **91.7** |
+| 512 | ~2.1M | 64.2 |
+| 768 | ~3.1M | 59.5 |
+| 1024 | ~4.2M | 50.9 |
+| 1280 train-eval | ~5.2M | 49.8 |
+| **final (20-batch post)** | **5.24M** | **43.34** |
+
+after/orig **~2.45**. vs R5 **48.38** and pure KL **49.31**: **PASS** (large).  
+**Promote:** fresh **`heal_kl_trust_400m`** (16×25M; paper pack). Do not stack LoRA on this path until pure curve is logged.
+
 ### 2.8 `scout_kl_r5_5m` (~5.24M) ✅ **best 5M scout (LoRA)**
 
 Kaggle 2026-07-28. Preset `scout_kl_r5_5m`: KL DNA + **LoRA r=8 α=8**, no pre_rms, no weight_calib.  
@@ -232,9 +249,9 @@ Still far from KL-50M **34.38** (10× tokens) — promote via **fresh long KL + 
 ### 5.3 Science options next  ← **see §5.8 decision tree**
 
 **A. Now (ordered)**  
-1. ~~§5.8 D0~~ ✅ flat error; FP-mask hurt. ~~R5 scout~~ ✅ **48.38**.  
-2. **§5.10.1 soft trust @ 5M** (`scout_kl_trust_5m`) — gate &lt; **48.38** (beat best 5M).  
-3. Other 5M scouts as needed; then **fresh long KL + LoRA r=8** — gate &lt; **34.38**.
+1. ~~§5.8 D0~~ ✅. ~~R5~~ ✅ 48.38. ~~trust+α0.3 scout~~ ✅ **43.34**.  
+2. **`heal_kl_trust_400m`** — 16×25M, DNA trust+α=0.3; paper pack `run_pack.py`.  
+3. Optional later: LoRA long as **separate** run (not stacked on 400M mainline).
 
 **B. Paper hygiene (cheap, parallel)**  
 1. **FP continued-pretrain control** — same FineWeb, ~25–50M tokens, **no quant**.  

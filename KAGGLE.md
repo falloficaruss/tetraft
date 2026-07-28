@@ -6,17 +6,23 @@
 
 | Kaggle Dataset | Contents |
 |----------------|----------|
-| **`tetraft-code`** | Flat root `.py` + `notebooks/` |
-| **`tetraft-fineweb-edu-50m`** | `train.jsonl`, `val.jsonl`, `sample_meta.json` |
-| **Session B** | Session A `checkpoint-final` (**full** opt+sched) |
+| **`tetraft-code`** | Flat root `.py` + `notebooks/` + `scripts/` |
+| **`tetraft-fineweb-edu-400m`** | Marathon train/val (build with `SAMPLE=400m`) |
+| **`tetraft-fineweb-edu-50m`** | Legacy 50M sample |
+| **`tetraft-heal-kl-trust-400m`** | Growing run pack: ledger + `sessions/Sxx` + ckpt |
 
 Zip code without `.venv` / `data/` / checkpoints. Refresh `tetraft-code` when modules change.
 
 ---
 
-## A. FineWeb-Edu 50M sample ✅
+## A. FineWeb samples
 
-CPU, Internet ON → `notebooks/build_fineweb_sample.ipynb` → Dataset `tetraft-fineweb-edu-50m`.
+| Sample | Notebook `SAMPLE=` | Dataset name |
+|--------|--------------------|--------------|
+| 50M (legacy) | `50m` | `tetraft-fineweb-edu-50m` ✅ |
+| **400M (marathon)** | **`400m`** | **`tetraft-fineweb-edu-400m`** ← build first |
+
+CPU, Internet ON → `notebooks/build_fineweb_sample.ipynb`.
 
 ---
 
@@ -57,44 +63,55 @@ Defaults: weights-only best/final; `save_steps=0`.
 
 Replay (if needed): notebook `SESSION=A|B`; see `RESULTS.md` §2.6.
 
-**Next science:** fresh **long KL + LoRA** (`RESULTS.md` §2.8 / §5.9). R5 scout ✅ **48.38**.
+**Mainline:** **`heal_kl_trust_400m`** (trust+α=0.3, 16×25M). Scout ✅ **~43.34** @ 5M.
 
 | Option | What | Gate | Status |
 |--------|------|------|--------|
-| **D0 layer map** | `run_layer_map.py` on B | role table | ✅ done |
-| **Bundle R345** | R3+R4+R5 | &lt; 49.31 | ❌ FAIL |
+| **Trust+α0.3 scout** | `scout_kl_trust_a03_5m` | &lt; 48.38 | ✅ **~43.34** |
 | **R5-only** | `scout_kl_r5_5m` | &lt; 49.31 | ✅ **48.38** |
-| **Soft trust STE** | `scout_kl_trust_5m` §5.10.1 | &lt; **48.38** | **next 5M scout** |
-| **Long KL + LoRA** | heal_kl DNA + lora_rank=8 @ 50M | &lt; **34.38** | after 5M scouts |
-| α/T / polish | — | — | null / FAIL |
+| **400M marathon** | `heal_kl_trust_400m` S1–S16 | S1&lt;48.65 · S2&lt;34.38 | **next** |
+| Bundle R345 / polish | — | — | FAIL |
 
-### D.0b R5-only scout ✅ done
+### D.0 Marathon — `heal_kl_trust_400m` ← **run this**
 
-End PPL **48.38** (gate 49.31). Curve: 117→95→71→61→**48.4**. Adapters ~3.2M.  
-**Do not** re-run scout unless ablating rank.
+**DNA:** trust s=1.0, α=0.3, T=2, β=0.01, skip GDN, cosine horizon **97664**, no LoRA.
 
-### D.0c Soft trust STE scout ← **run this (5M first)**
+| Attach | When |
+|--------|------|
+| code + `tetraft-fineweb-edu-400m` | every hop |
+| + `tetraft-heal-kl-trust-400m` | S2–S16 (prior pack) |
 
-Gate end PPL **&lt; 48.38** (beat best 5M / R5). Abort if @λ=1 PPL ≫ 500. No LoRA.
+Notebook: `SESSION = 1` … `16` only. After each hop publish  
+`/kaggle/working/heal_kl_trust_400m/` → Dataset **`tetraft-heal-kl-trust-400m`**.
 
-| Preset | Knobs | Use when |
-|--------|-------|----------|
-| `scout_kl_trust_5m` | trust only (α=0.5 T=2) | clean STE attribution |
-| **`scout_kl_trust_a03_5m`** | trust + **α=0.3** T=2 | chase best 5M (more teacher) |
+| Session | stop steps | ≈ tok | save_optimizer | Gate |
+|--------:|----------:|------:|:--------------:|------|
+| 1 | 6104 | 25M | full | &lt; 48.65 |
+| 2 | 12208 | 50M | full | &lt; 34.38 |
+| 4 | 24416 | 100M | full | &lt; 30 |
+| 16 | 97664 | 400M | weights OK | stretch ≲ 23 |
+
+Pack layout: `ledger.jsonl`, `LATEST.json`, `sessions/Sxx/{session_summary,metrics,smoke_results,checkpoint-final}`.
 
 ```bash
-# Prefer for best-PPL try (α=0.3 was slightly better historically)
-python run_smoke.py --preset scout_kl_trust_a03_5m \
-  --train-data /kaggle/input/tetraft-fineweb-edu-50m/train.jsonl \
-  --val-data /kaggle/input/tetraft-fineweb-edu-50m/val.jsonl \
-  --output-dir /kaggle/working/checkpoints_scout_kl_trust_a03_5m
-
-# One-knob STE control (same DNA as scout_kl_5m + trust)
-python run_smoke.py --preset scout_kl_trust_5m \
-  --train-data /kaggle/input/tetraft-fineweb-edu-50m/train.jsonl \
-  --val-data /kaggle/input/tetraft-fineweb-edu-50m/val.jsonl \
-  --output-dir /kaggle/working/checkpoints_scout_kl_trust_5m
+# CLI equivalent for session k (example k=1)
+python run_smoke.py --preset heal_kl_trust_400m \
+  --max-steps 6104 --save-optimizer \
+  --run-session 1 --run-pack-dir /kaggle/working/heal_kl_trust_400m \
+  --train-data ... --val-data ... \
+  --output-dir /kaggle/working/train_heal_kl_trust_400m_S01
 ```
+
+Paper figures (local after S16):
+
+```bash
+python scripts/merge_run_pack.py path/to/heal_kl_trust_400m
+python scripts/plot_heal_kl_trust_400m.py path/to/heal_kl_trust_400m
+```
+
+### D.0b Soft trust scout ✅ done (~43.34)
+
+`scout_kl_trust_a03_5m`: post-smoke **43.34** (gate 48.38). DNA locked into 400M.
 
 ### D.1 D0 layer map ← **run this**
 

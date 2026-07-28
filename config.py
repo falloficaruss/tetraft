@@ -324,6 +324,33 @@ SMOKE_PRESETS: Dict[str, dict] = {
         "weight_calib": "none",
         "lora_rank": 0,
     },
+    # Long heal: soft trust + α=0.3 @ ~400M (16 × 6104 ≈ 25M sessions).
+    # Cosine horizon locked at 97664. Session k: --max-steps k*6104;
+    # k>1 resume full ckpt + --skip-shock --skip-orig; save_optimizer S1–S15.
+    # DNA locked from scout_kl_trust_a03_5m PASS (~43.34 @ 5M). No LoRA.
+    "heal_kl_trust_400m": {
+        "max_steps": 97664,
+        "schedule_max_steps": 97664,
+        "quant_warmup_steps": 256,
+        "warmup_steps": 128,
+        "logging_steps": 50,
+        "eval_steps": 1024,
+        "save_steps": 0,
+        "learning_rate": 2e-4,
+        "lr_scheduler_type": "cosine",
+        "min_lr_ratio": 0.1,
+        "skip_linear_attn": True,
+        "quaternary_c": 0.25,
+        "distill_alpha": 0.3,
+        "distill_temperature": 2.0,
+        "quant_reg_beta": 0.01,
+        "ste_mode": "trust",
+        "trust_softness": 1.0,
+        "pre_rms": False,
+        "weight_calib": "none",
+        "lora_rank": 0,
+        "save_optimizer": True,
+    },
     # Polish from heal_kl_50m B weights (~5.24M more tokens). Weights-only resume
     # rebuilds Adam+sched from 0; schedule_max_steps = polish length (not 13487).
     #   --resume B/checkpoint-final --skip-shock --skip-orig

@@ -181,6 +181,29 @@ def _parse_args(argv=None):
         default=None,
         help="Soft trust STE softness s (ste_mode=trust); default 1.0.",
     )
+    p.add_argument(
+        "--no-save-optimizer",
+        action="store_true",
+        help="Force weights-only final (override presets that set save_optimizer=True).",
+    )
+    p.add_argument(
+        "--run-session",
+        type=int,
+        default=None,
+        help="Marathon session index (1..N). Writes paper pack under --run-pack-dir.",
+    )
+    p.add_argument(
+        "--run-pack-dir",
+        type=str,
+        default=None,
+        help="Root for heal_kl_trust_400m paper pack (ledger, sessions/Sxx, LATEST).",
+    )
+    p.add_argument(
+        "--run-id",
+        type=str,
+        default=None,
+        help="Run id for paper pack (default: heal_kl_trust_400m).",
+    )
     return p.parse_args(argv)
 
 
@@ -222,7 +245,9 @@ def _apply_cli_overrides(config: QAFTConfig, args) -> QAFTConfig:
         config.eval_steps = args.eval_steps
     if getattr(args, "save_steps", None) is not None:
         config.save_steps = args.save_steps
-    if getattr(args, "save_optimizer", False):
+    if getattr(args, "no_save_optimizer", False):
+        config.save_optimizer = False
+    elif getattr(args, "save_optimizer", False):
         config.save_optimizer = True
     if getattr(args, "schedule_max_steps", None) is not None:
         config.schedule_max_steps = args.schedule_max_steps
@@ -348,6 +373,17 @@ def run_smoke(args=None) -> Dict[str, Any]:
         ("resume", None),
         ("skip_orig", False),
         ("schedule_max_steps", None),
+        ("ste_mode", None),
+        ("trust_softness", None),
+        ("no_save_optimizer", False),
+        ("run_session", None),
+        ("run_pack_dir", None),
+        ("run_id", None),
+        ("pre_rms", None),
+        ("no_pre_rms", False),
+        ("weight_calib", None),
+        ("lora_rank", None),
+        ("lora_alpha", None),
     ):
         if not hasattr(ns, field):
             setattr(ns, field, default)
@@ -530,6 +566,11 @@ def run_smoke(args=None) -> Dict[str, Any]:
         results["ppl_after_smoke"] = ppl_after
         results["steps_ran"] = trainer.global_step
         results["tokens_seen"] = tokens_seen
+        results["ppl_best_in_session"] = (
+            float(trainer.best_perplexity)
+            if trainer.best_perplexity < float("inf")
+            else None
+        )
         results["train_metrics"] = {
             "steps": trainer.metrics.get("step", []),
             "loss": trainer.metrics.get("loss", []),
@@ -581,6 +622,66 @@ def run_smoke(args=None) -> Dict[str, Any]:
     with out_path.open("w", encoding="utf-8") as f:
         json.dump(results, f, indent=2, default=str)
     logger.info("Smoke results written to %s", out_path)
+
+    # Paper pack: session summary + ledger (marathon sessions)
+    run_session = getattr(ns, "run_session", None)
+    run_pack_dir = getattr(ns, "run_pack_dir", None)
+    if run_session is not None and run_pack_dir:
+        from run_pack import (
+            RUN_ID_TRUST_400M,
+            build_session_summary,
+            dna_from_config,
+            ensure_run_root,
+            write_session_pack,
+        )
+
+        run_id = getattr(ns, "run_id", None) or RUN_ID_TRUST_400M
+        pack_root = ensure_run_root(run_pack_dir, run_id=run_id)
+        step_end = int(results.get("steps_ran") or config.max_steps)
+        step_start = int(results.get("resumed_step") or 0)
+        ppl_end = results.get("ppl_after_smoke")
+        summary = build_session_summary(
+            run_id=run_id,
+            session=int(run_session),
+            step_start=step_start,
+            step_end=step_end,
+            tokens_per_step=config.tokens_per_step(),
+            ppl_end=float(ppl_end) if ppl_end is not None else None,
+            ppl_best_in_session=results.get("ppl_best_in_session"),
+            ppl_original=results.get("ppl_original"),
+            ppl_shock=results.get("ppl_shock"),
+            dna=dna_from_config(config),
+            resumed_from=resume_path,
+            inventory_summary=results.get("inventory_summary"),
+            max_eval_batches=int(getattr(ns, "max_eval_batches", 20) or 20),
+        )
+        metrics_src = Path(config.output_dir) / config.metrics_filename
+        ckpt_final = Path(config.output_dir) / "checkpoint-final"
+        inv_src = Path(config.output_dir) / "linear_inventory.json"
+        sess_dir = write_session_pack(
+            pack_root,
+            summary,
+            smoke_results=results,
+            metrics_src=metrics_src if metrics_src.is_file() else None,
+            checkpoint_final_src=ckpt_final if ckpt_final.is_file() else None,
+            inventory_src=inv_src if inv_src.is_file() else None,
+        )
+        results["run_pack_dir"] = str(pack_root)
+        results["session_summary"] = summary
+        results["session_dir"] = str(sess_dir)
+        logger.info(
+            "Paper pack session %s: ppl_end=%s gate=%s %s → %s",
+            summary.get("session_tag"),
+            summary.get("ppl_end"),
+            summary.get("gate_ppl"),
+            summary.get("gate_status"),
+            sess_dir,
+        )
+        logger.info(
+            "After this hop: publish %s as Kaggle Dataset and attach next session",
+            pack_root,
+        )
+
     return results
 
 

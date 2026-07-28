@@ -17,10 +17,10 @@ Instructions for coding agents working in this repository.
 ## Current focus
 
 **Read `RESULTS.md` §5.8–§5.10 before changing train recipe.**  
-Best long: **`heal_kl_50m` → ~34.38 @ 50M** (~1.95×). Best 5M: **`scout_kl_r5_5m` → ~48.38** (LoRA r=8) ✅.  
-**Next 5M scouts first** (before 50M): **`scout_kl_trust_5m`** soft trust STE (gate &lt;**48.38**). Then long KL + LoRA.  
-α/T null; polish FAIL; bundle R345 FAIL; no R4 `unit_absmean`.  
-Do not: polish B, static α/T, BitNet, CE-only marathon, 2B, SFT, Muon — unless asked.
+Best long (legacy): **`heal_kl_50m` → ~34.38 @ 50M**. Best 5M: **`scout_kl_trust_a03_5m` → ~43.34** (trust+α=0.3) ✅.  
+**Mainline:** **`heal_kl_trust_400m`** — 16×25M sessions, paper pack under `run_pack.py`.  
+DNA: trust s=1.0, α=0.3, T=2, no LoRA. Data: `tetraft-fineweb-edu-400m`.  
+Do not: polish B, BitNet, CE-only, 2B, SFT, Muon, stack LoRA on 400M — unless asked.
 
 ## Entry pattern
 
@@ -43,11 +43,13 @@ Files are **flat at root** (no package dir) — required for Kaggle Dataset flat
 | `model.py` | `replace_linear_layers()` + skip policy + inventory |
 | `train.py` | `QAFTTrainer` (BF16, 8-bit Adam, \(\lambda\) anneal) |
 | `eval.py` | `evaluate_perplexity()` |
-| `config.py` | `QAFTConfig` dataclass (defaults = plan defaults) |
+| `config.py` | `QAFTConfig` + `SMOKE_PRESETS` (incl. `heal_kl_trust_400m`) |
 | `data.py` | FineWeb-Edu sample builder + packed JSONL dataloaders |
-| `run_smoke.py` | Phase 1 smoke: inventory → orig/shock PPL → short QAFT |
+| `run_smoke.py` | inventory → orig/shock PPL → QAFT; optional paper pack |
+| `run_pack.py` | Marathon ledger / `sessions/Sxx` / curves for paper |
+| `scripts/` | `merge_run_pack.py`, `plot_heal_kl_trust_400m.py` |
 | `tests/` | unit tests |
-| `notebooks/` | Optional glue only — **not** source of truth |
+| `notebooks/` | Kaggle glue — **not** source of truth |
 
 ## Locked design decisions
 

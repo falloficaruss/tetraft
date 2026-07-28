@@ -357,10 +357,16 @@ class QAFTTrainer:
                         lr,
                         lambda_val,
                     )
+                    tok_per = (
+                        int(self.config.tokens_per_step())
+                        if hasattr(self.config, "tokens_per_step")
+                        else 0
+                    )
                     self._append_metrics_row(
                         {
                             "event": "log",
                             "step": self.global_step,
+                            "tokens": self.global_step * tok_per,
                             "loss": avg_loss,
                             "ce": avg_ce,
                             "kl": avg_kl,
@@ -382,15 +388,24 @@ class QAFTTrainer:
                     if ppl < self.best_perplexity:
                         self.best_perplexity = ppl
                         self._save_checkpoint("best")
-                    self._append_metrics_row(
-                        {
-                            "event": "eval",
-                            "step": self.global_step,
-                            "perplexity": ppl,
-                            "best_perplexity": self.best_perplexity,
-                            "lambda": self._current_lambda(),
-                        }
+                    tok_per = (
+                        int(self.config.tokens_per_step())
+                        if hasattr(self.config, "tokens_per_step")
+                        else 0
                     )
+                    eval_row: Dict[str, Any] = {
+                        "event": "eval",
+                        "step": self.global_step,
+                        "tokens": self.global_step * tok_per,
+                        "perplexity": ppl,
+                        "best_perplexity": self.best_perplexity,
+                        "lambda": self._current_lambda(),
+                    }
+                    try:
+                        eval_row["quant_bins"] = quant_bin_stats(self.model)
+                    except Exception:
+                        pass
+                    self._append_metrics_row(eval_row)
 
                 if save_steps > 0 and self.global_step % save_steps == 0:
                     self._save_checkpoint(f"step_{self.global_step}")
