@@ -10,6 +10,8 @@
 | `RESULTS.md` | **Frozen Kaggle baselines + architectural next steps** |
 | `PLAN.md` | Models, data, VRAM, Kaggle |
 | `RESEARCH_PLAN.md` | This file — phases, experiments, paper |
+| `PAPER.md` | Internal paper outline, claims, tables |
+| `PAPER_MATH.md` | Equation sheet + theory appendix |
 | `KAGGLE.md` | Kaggle ops |
 | `AGENTS.md` | Coding agent conventions |
 
@@ -208,13 +210,17 @@ Details: **`RESULTS.md`**.
 
 ## 7. Paper outline (target)
 
-1. Intro — convert existing LLMs to 2-bit quaternary; retain quality  
-2. Background — QAT, PTQ limits; BitNet as related motivation  
-3. Method — TetraFT (grid, scale, STE, \(\lambda\), module policy)  
+**Living draft:** [`PAPER.md`](PAPER.md) (prose/claims/tables) + [`PAPER_MATH.md`](PAPER_MATH.md) (equations & theory appendix).  
+Implementation math law remains [`RESEARCH.md`](RESEARCH.md).
+
+1. Intro — convert existing LLMs to 2-bit quaternary; retain quality; BitNet-class efficiency *potential*  
+2. Background — QAT, PTQ limits; BitNet as related motivation (not bake-off)  
+3. Method — TetraFT (grid, scale, STE, \(\lambda\), trust, KL, module policy)  
 4. Setup — Qwen3.5, FineWeb-Edu sample, budgets, parity metrics  
-5. Results — shock, recovery, parity, ablations, efficiency  
+5. Results — shock, recovery, parity, ablations, efficiency footprint  
 6. Analysis — bins, hybrid layers, remaining gaps  
 7. Limitations & conclusion  
+8. Appendix — full theory (`PAPER_MATH.md`)
 
 ---
 

@@ -12,6 +12,8 @@ Convert a pretrained model to weights on \(\{-1,-c,c,1\}\), then heal so perform
 | [`RESULTS.md`](RESULTS.md) | **Kaggle baselines + what to do next architecturally** |
 | [`PLAN.md`](PLAN.md) | Models, FineWeb-Edu data, VRAM, Kaggle |
 | [`RESEARCH_PLAN.md`](RESEARCH_PLAN.md) | Phases, experiments, paper plan |
+| [`PAPER.md`](PAPER.md) | Paper outline, claims, frozen tables (internal draft) |
+| [`PAPER_MATH.md`](PAPER_MATH.md) | Equation sheet + theory appendix (split from paper) |
 | [`KAGGLE.md`](KAGGLE.md) | Kaggle checklist / disk lesson |
 | [`AGENTS.md`](AGENTS.md) | Conventions for coding agents |
 
