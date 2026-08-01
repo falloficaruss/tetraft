@@ -27,7 +27,9 @@ import torch
 from config import SMOKE_PRESETS, QAFTConfig, apply_smoke_preset
 from data import (
     build_packed_dataloader,
+    build_packed_dataloader_memmap,
     default_kaggle_data_candidates,
+    default_pack_cache_dir,
     resolve_data_path,
 )
 from eval import evaluate_perplexity, model_device
@@ -60,6 +62,14 @@ def _parse_args(argv=None):
     )
     p.add_argument("--max-eval-batches", type=int, default=20)
     p.add_argument("--max-train-texts", type=int, default=None, help="Cap docs loaded for packing")
+    p.add_argument(
+        "--pack-cache-dir",
+        type=str,
+        default=None,
+        help="Dir for memmap token cache (default: env TETRAFT_PACK_CACHE → "
+        "/kaggle/working/tetraft_pack_cache → ~/.cache/tetraft/pack). "
+        "Reused across marathon sessions.",
+    )
     p.add_argument("--max-val-texts", type=int, default=None)
     p.add_argument("--skip-train", action="store_true", help="Only inventory + original + shock PPL")
     p.add_argument("--skip-shock", action="store_true")
@@ -331,11 +341,14 @@ def _build_loaders(config: QAFTConfig, tokenizer, args):
     train_loader = None
     if train_path is not None and not args.skip_train:
         logger.info("train data: %s", train_path)
-        train_loader = build_packed_dataloader(
+        pack_cache = getattr(args, "pack_cache_dir", None) or default_pack_cache_dir()
+        logger.info("train pack cache: %s", pack_cache)
+        train_loader = build_packed_dataloader_memmap(
             train_path,
             tokenizer,
             seq_length=config.seq_length,
             batch_size=config.batch_size,
+            cache_dir=pack_cache,
             text_field=config.data_text_field,
             shuffle=True,
             num_workers=config.dataloader_num_workers,
@@ -384,6 +397,7 @@ def run_smoke(args=None) -> Dict[str, Any]:
         ("weight_calib", None),
         ("lora_rank", None),
         ("lora_alpha", None),
+        ("pack_cache_dir", None),
     ):
         if not hasattr(ns, field):
             setattr(ns, field, default)

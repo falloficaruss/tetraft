@@ -50,7 +50,10 @@ Stack: BF16 + AdamW8bit + grad ckpt, seq 512, batch 1, accum 8 → **4096 tok/st
 
 Defaults: weights-only best/final; `save_steps=0`.  
 **Resume sessions:** `save_optimizer=True` → **one** full `checkpoint-final` only (several GB). No `step_*` spam.  
-**heal_kl_50m A→B resume worked** (resumed_step=6104 → 12207).
+**heal_kl_50m A→B resume worked** (resumed_step=6104 → 12207).  
+**Token pack cache:** train loader tokenizes into a flat int32 memmap (~1.6 GB per 400M) under  
+`/kaggle/working/tetraft_pack_cache` (override: `--pack-cache-dir` / `TETRAFT_PACK_CACHE`).  
+Keep the dir attached between hops to skip rebuild; a rebuild is batched-tokenizer only (no 400M in RAM).
 
 ---
 

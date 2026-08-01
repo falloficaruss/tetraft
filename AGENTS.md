@@ -44,7 +44,7 @@ Files are **flat at root** (no package dir) — required for Kaggle Dataset flat
 | `train.py` | `QAFTTrainer` (BF16, 8-bit Adam, \(\lambda\) anneal) |
 | `eval.py` | `evaluate_perplexity()` |
 | `config.py` | `QAFTConfig` + `SMOKE_PRESETS` (incl. `heal_kl_trust_400m`) |
-| `data.py` | FineWeb-Edu sample builder + packed JSONL dataloaders |
+| `data.py` | FineWeb-Edu sample builder + packed JSONL dataloaders (memmap-backed for large samples) |
 | `run_smoke.py` | inventory → orig/shock PPL → QAFT; optional paper pack |
 | `run_pack.py` | Marathon ledger / `sessions/Sxx` / curves for paper |
 | `scripts/` | `merge_run_pack.py`, `plot_heal_kl_trust_400m.py` |

@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
 import random
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional, Sequence, Union
+from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple, Union
 
+import numpy as np
 import torch
 from torch.utils.data import DataLoader, Dataset
 
@@ -342,6 +344,218 @@ def build_packed_dataloader(
     packed = tokenize_and_pack(texts, tokenizer, seq_length=seq_length)
     return DataLoader(
         packed,
+        batch_size=batch_size,
+        shuffle=shuffle,
+        num_workers=num_workers,
+        drop_last=False,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Memmap packing (large samples; bounded RAM)
+# ---------------------------------------------------------------------------
+
+# Schema bump when the flat-stream layout changes (EOS placement, dtype, ...).
+_MEMMAP_PACK_VERSION = "v1"
+_MEMMAP_DTYPE = np.dtype("<i4")  # int32: vocab ids < 2**31; 400M tokens ≈ 1.6 GB
+
+
+def default_pack_cache_dir() -> Path:
+    """Default root for token memmap caches (env → Kaggle working → home)."""
+    env = os.environ.get("TETRAFT_PACK_CACHE")
+    if env:
+        return Path(env)
+    if os.path.isdir("/kaggle/working"):
+        return Path("/kaggle/working/tetraft_pack_cache")
+    return Path.home() / ".cache" / "tetraft" / "pack"
+
+
+def _pack_cache_key(
+    path: Path,
+    tokenizer,
+    text_field: str,
+    max_texts: Optional[int],
+) -> str:
+    st = path.stat()
+    h = hashlib.sha1()
+    h.update(_MEMMAP_PACK_VERSION.encode())
+    h.update(str(path.resolve()).encode())
+    h.update(str(st.st_size).encode())
+    h.update(str(st.st_mtime_ns).encode())
+    h.update(str(getattr(tokenizer, "name_or_path", "") or "").encode())
+    h.update(text_field.encode())
+    h.update(str(max_texts).encode())
+    return h.hexdigest()[:16]
+
+
+def build_memmap_pack(
+    path: Union[str, Path],
+    tokenizer,
+    cache_dir: Union[str, Path],
+    text_field: str = DEFAULT_TEXT_FIELD,
+    max_texts: Optional[int] = None,
+    chunk_texts: int = 1024,
+) -> Tuple[Path, int]:
+    """Tokenize JSONL in chunks into a flat int32 token stream on disk.
+
+    Returns ``(tokens_path, n_tokens)``. EOS is inserted between documents
+    (same semantics as ``pack_token_ids``); the trailing partial block is left
+    for the dataset layer to drop. Results are cached under *cache_dir* keyed
+    by (file, tokenizer, field, max_texts), so repeat sessions skip the build.
+    """
+    path = Path(path)
+    cache_dir = Path(cache_dir)
+    key = _pack_cache_key(path, tokenizer, text_field, max_texts)
+    pack_dir = cache_dir / key
+    tokens_path = pack_dir / "tokens.i32"
+    meta_path = pack_dir / "meta.json"
+
+    if meta_path.is_file() and tokens_path.is_file():
+        with meta_path.open("r", encoding="utf-8") as f:
+            meta = json.load(f)
+        n_tokens = int(meta["n_tokens"])
+        logger.info("memmap pack cache hit: %s (%d tokens)", pack_dir, n_tokens)
+        return tokens_path, n_tokens
+
+    eos_id = getattr(tokenizer, "eos_token_id", None)
+    pack_dir.mkdir(parents=True, exist_ok=True)
+    tmp_path = pack_dir / "tokens.i32.tmp"
+
+    n_tokens = 0
+    n_docs = 0
+    chunk: List[str] = []
+
+    def _flush(fh) -> None:
+        nonlocal n_tokens, n_docs, chunk
+        if not chunk:
+            return
+        enc = tokenizer(
+            chunk,
+            add_special_tokens=False,
+            truncation=False,
+            return_attention_mask=False,
+        )
+        for ids in enc["input_ids"]:
+            if not ids:
+                continue
+            if n_docs > 0 and eos_id is not None:
+                np.asarray([eos_id], dtype=_MEMMAP_DTYPE).tofile(fh)
+                n_tokens += 1
+            arr = np.asarray(ids, dtype=_MEMMAP_DTYPE)
+            if arr.size and int(arr.min()) < 0:
+                raise ValueError("token id out of int32 range (negative after cast)")
+            arr.tofile(fh)
+            n_tokens += int(arr.size)
+            n_docs += 1
+        if n_docs % 50_000 < len(chunk):
+            logger.info("memmap pack: docs=%d tokens=%d", n_docs, n_tokens)
+        chunk = []
+
+    logger.info("Building memmap pack: %s → %s", path, pack_dir)
+    with tmp_path.open("wb") as fh:
+        for row in iter_jsonl(path):
+            text = row.get(text_field, "")
+            if not isinstance(text, str) or not text.strip():
+                continue
+            chunk.append(text.strip())
+            if max_texts is not None and (n_docs + len(chunk)) >= max_texts:
+                _flush(fh)
+                break
+            if len(chunk) >= chunk_texts:
+                _flush(fh)
+        else:
+            _flush(fh)
+
+    if n_docs == 0:
+        tmp_path.unlink(missing_ok=True)
+        raise ValueError(f"No non-empty texts in {path} (field={text_field})")
+
+    os.replace(tmp_path, tokens_path)
+    with meta_path.open("w", encoding="utf-8") as f:
+        json.dump(
+            {
+                "version": _MEMMAP_PACK_VERSION,
+                "source": str(path.resolve()),
+                "n_tokens": n_tokens,
+                "n_docs": n_docs,
+                "max_texts": max_texts,
+            },
+            f,
+            indent=2,
+        )
+        f.write("\n")
+    logger.info("memmap pack done: docs=%d tokens=%d → %s", n_docs, n_tokens, tokens_path)
+    return tokens_path, n_tokens
+
+
+class MemmapPackedCausalLMDataset(Dataset):
+    """Lazy packed blocks over a flat int32 token stream (memmap-backed).
+
+    Block ``i`` is ``tokens[i*seq_length:(i+1)*seq_length]``; the trailing
+    partial block is dropped (same as ``pack_token_ids``).
+    """
+
+    def __init__(self, tokens_path: Union[str, Path], n_tokens: int, seq_length: int):
+        if seq_length < 2:
+            raise ValueError(f"seq_length must be >= 2, got {seq_length}")
+        self.tokens_path = Path(tokens_path)
+        self.n_tokens = int(n_tokens)
+        self.seq_length = seq_length
+        self._tokens = np.memmap(
+            self.tokens_path, dtype=_MEMMAP_DTYPE, mode="r", shape=(self.n_tokens,)
+        )
+        n_blocks = self.n_tokens // self.seq_length
+        if n_blocks == 0:
+            raise ValueError("MemmapPackedCausalLMDataset requires at least one full block")
+
+    def __len__(self) -> int:
+        return self.n_tokens // self.seq_length
+
+    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
+        start = idx * self.seq_length
+        ids = np.asarray(
+            self._tokens[start : start + self.seq_length], dtype=np.int64
+        )
+        input_ids = torch.from_numpy(ids)
+        labels = input_ids.clone()
+        attention_mask = torch.ones_like(input_ids)
+        return {
+            "input_ids": input_ids,
+            "labels": labels,
+            "attention_mask": attention_mask,
+        }
+
+
+def build_packed_dataloader_memmap(
+    path: Union[str, Path],
+    tokenizer,
+    seq_length: int,
+    batch_size: int,
+    cache_dir: Optional[Union[str, Path]] = None,
+    text_field: str = DEFAULT_TEXT_FIELD,
+    shuffle: bool = False,
+    num_workers: int = 0,
+    max_texts: Optional[int] = None,
+    chunk_texts: int = 1024,
+) -> DataLoader:
+    """Memmap-backed twin of ``build_packed_dataloader`` (bounded RAM)."""
+    tokens_path, n_tokens = build_memmap_pack(
+        path,
+        tokenizer,
+        cache_dir=cache_dir if cache_dir is not None else default_pack_cache_dir(),
+        text_field=text_field,
+        max_texts=max_texts,
+        chunk_texts=chunk_texts,
+    )
+    ds = MemmapPackedCausalLMDataset(tokens_path, n_tokens, seq_length)
+    logger.info(
+        "memmap packed dataset: %d blocks (seq=%d) from %d tokens",
+        len(ds),
+        seq_length,
+        n_tokens,
+    )
+    return DataLoader(
+        ds,
         batch_size=batch_size,
         shuffle=shuffle,
         num_workers=num_workers,
