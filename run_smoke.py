@@ -214,6 +214,17 @@ def _parse_args(argv=None):
         default=None,
         help="Run id for paper pack (default: heal_kl_trust_400m).",
     )
+    p.add_argument(
+        "--no-prune-old-checkpoints",
+        action="store_true",
+        help="Keep every session checkpoint-final in the run pack (default: prune to latest).",
+    )
+    p.add_argument(
+        "--keep-training-checkpoint",
+        action="store_true",
+        help="Keep the training-output checkpoint-final after it is copied into the pack "
+        "(default: delete the source copy to save disk).",
+    )
     return p.parse_args(argv)
 
 
@@ -398,6 +409,8 @@ def run_smoke(args=None) -> Dict[str, Any]:
         ("lora_rank", None),
         ("lora_alpha", None),
         ("pack_cache_dir", None),
+        ("no_prune_old_checkpoints", False),
+        ("keep_training_checkpoint", False),
     ):
         if not hasattr(ns, field):
             setattr(ns, field, default)
@@ -679,6 +692,8 @@ def run_smoke(args=None) -> Dict[str, Any]:
             metrics_src=metrics_src if metrics_src.is_file() else None,
             checkpoint_final_src=ckpt_final if ckpt_final.is_file() else None,
             inventory_src=inv_src if inv_src.is_file() else None,
+            keep_only_latest_checkpoint=not ns.no_prune_old_checkpoints,
+            delete_checkpoint_source=not ns.keep_training_checkpoint,
         )
         results["run_pack_dir"] = str(pack_root)
         results["session_summary"] = summary

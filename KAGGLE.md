@@ -50,6 +50,7 @@ Stack: BF16 + AdamW8bit + grad ckpt, seq 512, batch 1, accum 8 → **4096 tok/st
 
 Defaults: weights-only best/final; `save_steps=0`.  
 **Resume sessions:** `save_optimizer=True` → **one** full `checkpoint-final` only (several GB). No `step_*` spam.  
+**Pack keeps only the latest `checkpoint-final`** (`write_session_pack` prunes older `sessions/Sxx/checkpoint-final`; the training-output copy is deleted after packing) → `/kaggle/working` stays bounded at one full ckpt per hop.  
 **heal_kl_50m A→B resume worked** (resumed_step=6104 → 12207).  
 **Token pack cache:** train loader tokenizes into a flat int32 memmap (~1.6 GB per 400M) under  
 `/kaggle/working/tetraft_pack_cache` (override: `--pack-cache-dir` / `TETRAFT_PACK_CACHE`).  
@@ -94,7 +95,8 @@ Notebook: `SESSION = 1` … `16` only. After each hop publish
 | 4 | 24416 | 100M | full | &lt; 30 |
 | 16 | 97664 | 400M | weights OK | stretch ≲ 23 |
 
-Pack layout: `ledger.jsonl`, `LATEST.json`, `sessions/Sxx/{session_summary,metrics,smoke_results,checkpoint-final}`.
+Pack layout: `ledger.jsonl`, `LATEST.json`, `sessions/Sxx/{session_summary,metrics,smoke_results,checkpoint-final}`.  
+Only the latest session keeps `checkpoint-final`; all small artifacts (summaries, metrics, smoke_results, ledger, curves) are retained for the paper.
 
 ```bash
 # CLI equivalent for session k (example k=1)

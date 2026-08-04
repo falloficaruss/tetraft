@@ -8,6 +8,7 @@ from run_pack import (
     SESSION_MICRO_STEPS,
     build_session_summary,
     ensure_run_root,
+    find_resume_checkpoint,
     merge_run_pack,
     rebuild_curves,
     session_gate_ppl,
@@ -15,6 +16,21 @@ from run_pack import (
     session_tag,
     write_session_pack,
 )
+
+
+def _summary(session: int, ppl: float):
+    return build_session_summary(
+        run_id="heal_kl_trust_400m",
+        session=session,
+        step_start=(session - 1) * SESSION_MICRO_STEPS,
+        step_end=session * SESSION_MICRO_STEPS,
+        tokens_per_step=4096,
+        ppl_end=ppl,
+        ppl_best_in_session=ppl,
+        ppl_original=17.67,
+        ppl_shock=17800.0,
+        dna={"ste_mode": "trust", "distill_alpha": 0.3},
+    )
 
 
 def test_horizon_math():
@@ -97,3 +113,82 @@ def test_write_session_pack_and_merge(tmp_path: Path):
     text = (root / "curves" / "recovery_ppl.csv").read_text(encoding="utf-8")
     assert "S01" in text and "S02" in text
     assert "recovery_ppl" in out
+
+
+def test_pack_keeps_only_latest_checkpoint(tmp_path: Path):
+    root = ensure_run_root(tmp_path / "heal_kl_trust_400m")
+    s01_ckpt = tmp_path / "train_S01" / "checkpoint-final"
+    s01_ckpt.parent.mkdir(parents=True)
+    s01_ckpt.write_bytes(b"ckpt-s01")
+    s01_metrics = tmp_path / "train_S01" / "metrics.jsonl"
+    s01_metrics.write_text('{"event":"log","step":6104,"tokens":25001984}\n', encoding="utf-8")
+
+    write_session_pack(
+        root, _summary(1, 40.0), metrics_src=s01_metrics, checkpoint_final_src=s01_ckpt
+    )
+    assert (root / "sessions/S01" / "checkpoint-final").is_file()
+
+    s02_ckpt = tmp_path / "train_S02" / "checkpoint-final"
+    s02_ckpt.parent.mkdir(parents=True)
+    s02_ckpt.write_bytes(b"ckpt-s02")
+
+    write_session_pack(
+        root,
+        _summary(2, 33.0),
+        checkpoint_final_src=s02_ckpt,
+        delete_checkpoint_source=True,
+    )
+
+    assert not (root / "sessions/S01" / "checkpoint-final").exists()
+    assert (root / "sessions/S02" / "checkpoint-final").is_file()
+    assert not s02_ckpt.exists()
+
+    for small in ("session_summary.json", "metrics.jsonl"):
+        assert (root / "sessions/S01" / small).is_file()
+    assert (root / "sessions/S02" / "session_summary.json").is_file()
+
+    latest = __import__("json").loads(
+        (root / "LATEST.json").read_text(encoding="utf-8")
+    )
+    assert latest["session_tag"] == "S02"
+    resume = find_resume_checkpoint(root, session=3)
+    assert resume is not None and resume.name == "checkpoint-final"
+    assert resume.parent.name == "S02"
+
+
+def test_pack_no_prune_without_new_checkpoint(tmp_path: Path):
+    root = ensure_run_root(tmp_path / "heal_kl_trust_400m")
+    s01_ckpt = tmp_path / "train_S01" / "checkpoint-final"
+    s01_ckpt.parent.mkdir(parents=True)
+    s01_ckpt.write_bytes(b"ckpt-s01")
+
+    write_session_pack(root, _summary(1, 40.0), checkpoint_final_src=s01_ckpt)
+    assert (root / "sessions/S01" / "checkpoint-final").is_file()
+
+    write_session_pack(root, _summary(2, 33.0))
+    assert (root / "sessions/S01" / "checkpoint-final").is_file()
+    assert s01_ckpt.is_file()
+    assert not (root / "sessions/S02" / "checkpoint-final").exists()
+
+
+def test_pack_flags_disable_prune_and_delete(tmp_path: Path):
+    root = ensure_run_root(tmp_path / "heal_kl_trust_400m")
+    s01_ckpt = tmp_path / "train_S01" / "checkpoint-final"
+    s01_ckpt.parent.mkdir(parents=True)
+    s01_ckpt.write_bytes(b"ckpt-s01")
+    s02_ckpt = tmp_path / "train_S02" / "checkpoint-final"
+    s02_ckpt.parent.mkdir(parents=True)
+    s02_ckpt.write_bytes(b"ckpt-s02")
+
+    write_session_pack(root, _summary(1, 40.0), checkpoint_final_src=s01_ckpt)
+    write_session_pack(
+        root,
+        _summary(2, 33.0),
+        checkpoint_final_src=s02_ckpt,
+        keep_only_latest_checkpoint=False,
+        delete_checkpoint_source=False,
+    )
+
+    assert (root / "sessions/S01" / "checkpoint-final").is_file()
+    assert (root / "sessions/S02" / "checkpoint-final").is_file()
+    assert s01_ckpt.is_file() and s02_ckpt.is_file()

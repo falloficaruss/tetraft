@@ -8,6 +8,10 @@ Layout (under run root, e.g. /kaggle/working/heal_kl_trust_400m)::
     LATEST.json
     sessions/S01/{session_summary,metrics,smoke_results,checkpoint-final,...}
     curves/*.csv
+
+Only the **latest** session keeps ``checkpoint-final`` (pack size bounded);
+older session checkpoints are pruned after each pack write. All small paper
+artifacts (summaries, metrics, smoke_results, ledger, curves) are retained.
 """
 
 from __future__ import annotations
@@ -283,6 +287,23 @@ def build_session_summary(
     }
 
 
+def _prune_old_session_checkpoints(run_root: Union[str, Path], *, keep_tag: str) -> None:
+    """Remove ``sessions/S*/checkpoint-final`` for every session except keep_tag.
+
+    Keeps the run pack bounded at a single full checkpoint (the latest). Small
+    session artifacts (summary, metrics, smoke_results) are left untouched.
+    """
+    root = Path(run_root)
+    for ckpt in sorted((root / "sessions").glob("S*/checkpoint-final")):
+        if ckpt.parent.name == keep_tag:
+            continue
+        try:
+            ckpt.unlink()
+            logger.info("Pruned stale session checkpoint: %s", ckpt)
+        except OSError as e:
+            logger.warning("Failed to prune %s: %s", ckpt, e)
+
+
 def write_session_pack(
     run_root: Union[str, Path],
     summary: Dict[str, Any],
@@ -292,8 +313,17 @@ def write_session_pack(
     checkpoint_final_src: Optional[Union[str, Path]] = None,
     inventory_src: Optional[Union[str, Path]] = None,
     copy_checkpoint: bool = True,
+    keep_only_latest_checkpoint: bool = True,
+    delete_checkpoint_source: bool = False,
 ) -> Path:
-    """Write sessions/Sxx artifacts, append ledger, update LATEST.json."""
+    """Write sessions/Sxx artifacts, append ledger, update LATEST.json.
+
+    ``keep_only_latest_checkpoint`` keeps the pack bounded: after a new
+    ``checkpoint-final`` lands in the pack, every older ``sessions/S*/checkpoint-final``
+    is removed. ``delete_checkpoint_source`` additionally removes the training-output
+    source checkpoint once it has been copied (both only run when a new checkpoint
+    was actually written into the pack, so LATEST.json never dangles).
+    """
     root = ensure_run_root(run_root, run_id=str(summary.get("run_id") or RUN_ID_TRUST_400M))
     tag = summary.get("session_tag") or session_tag(int(summary["session"]))
     sess_dir = root / "sessions" / tag
@@ -311,6 +341,8 @@ def write_session_pack(
 
     ckpt_rel = None
     ckpt_abs = None
+    copied_new_ckpt = False
+    dst = None
     if checkpoint_final_src is not None and Path(checkpoint_final_src).is_file():
         src = Path(checkpoint_final_src)
         dst = sess_dir / "checkpoint-final"
@@ -319,9 +351,24 @@ def write_session_pack(
                 shutil.copy2(src, dst)
             ckpt_abs = str(dst)
             ckpt_rel = str(dst.relative_to(root))
+            copied_new_ckpt = True
         else:
             ckpt_abs = str(src)
             ckpt_rel = str(src)
+
+    if copied_new_ckpt:
+        if keep_only_latest_checkpoint:
+            _prune_old_session_checkpoints(root, keep_tag=tag)
+        if delete_checkpoint_source and checkpoint_final_src is not None:
+            src = Path(checkpoint_final_src)
+            if dst is not None and src.resolve() != dst.resolve():
+                try:
+                    src.unlink()
+                    logger.info(
+                        "Removed training-output checkpoint after pack copy: %s", src
+                    )
+                except OSError as e:
+                    logger.warning("Failed to remove %s: %s", src, e)
 
     ledger_row = {
         "run_id": summary.get("run_id"),
