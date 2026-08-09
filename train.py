@@ -387,7 +387,7 @@ class QAFTTrainer:
                     ppl = self._evaluate(eval_dataloader)
                     if ppl < self.best_perplexity:
                         self.best_perplexity = ppl
-                        self._save_checkpoint("best")
+                        self._save_checkpoint("best", full=False)
                     tok_per = (
                         int(self.config.tokens_per_step())
                         if hasattr(self.config, "tokens_per_step")

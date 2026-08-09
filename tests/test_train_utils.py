@@ -491,6 +491,37 @@ class TestDiskSafeCheckpoints:
         ckpt = torch.load(path, map_location="cpu", weights_only=False)
         assert "optimizer_state_dict" in ckpt
 
+    def test_best_weights_only_even_with_save_optimizer(self, tmp_path):
+        """Marathon hops: optimizer+LR state lives only in checkpoint-final."""
+        trainer, _ = self._tiny_trainer(tmp_path, save_optimizer=True)
+        trainer.global_step = 3
+        path = trainer._save_checkpoint("best", full=False)
+        ckpt = torch.load(path, map_location="cpu", weights_only=False)
+        assert "optimizer_state_dict" not in ckpt
+        assert "scheduler_state_dict" not in ckpt
+        assert ckpt.get("weights_only") is True
+
+    def test_train_loop_best_is_weights_only(self, tmp_path):
+        trainer, cfg = self._tiny_trainer(
+            tmp_path,
+            save_optimizer=True,
+            max_steps=2,
+            logging_steps=1,
+            eval_steps=1,
+        )
+        ids = torch.randint(0, 32, (1, 8))
+        batch = {
+            "input_ids": ids,
+            "labels": ids.clone(),
+            "attention_mask": torch.ones_like(ids),
+        }
+        trainer.train([batch, batch], eval_dataloader=[batch, batch])
+        best = os.path.join(cfg.output_dir, "checkpoint-best")
+        assert os.path.isfile(best)
+        ckpt = torch.load(best, map_location="cpu", weights_only=False)
+        assert "optimizer_state_dict" not in ckpt
+        assert ckpt.get("weights_only") is True
+
     def test_load_weights_only_skips_missing_opt(self, tmp_path):
         trainer, _ = self._tiny_trainer(tmp_path)
         trainer.global_step = 5

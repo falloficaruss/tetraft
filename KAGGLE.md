@@ -49,12 +49,17 @@ Stack: BF16 + AdamW8bit + grad ckpt, seq 512, batch 1, accum 8 → **4096 tok/st
 ## C. Disk lesson
 
 Defaults: weights-only best/final; `save_steps=0`.  
-**Resume sessions:** `save_optimizer=True` → **one** full `checkpoint-final` only (several GB). No `step_*` spam.  
-**Pack keeps only the latest `checkpoint-final`** (`write_session_pack` prunes older `sessions/Sxx/checkpoint-final`; the training-output copy is deleted after packing) → `/kaggle/working` stays bounded at one full ckpt per hop.  
+**Resume sessions:** `save_optimizer=True` → optimizer state is saved **only into `checkpoint-final`** (`checkpoint-best` is always weights-only); one full `checkpoint-final` per hop (several GB). No `step_*` spam.  
+**Pack write is rename-based** (`write_session_pack` now `os.replace`s the finished `checkpoint-final` into `sessions/Sxx` instead of copying, so the final hop needs ~0 extra disk; falls back to copy when src/dst cross filesystems). Older `sessions/S*/checkpoint-final` are pruned during the write → `/kaggle/working` stays bounded at one full ckpt per hop.  
+**Seeding** copies the prior pack's **small artifacts for every session** but the full `checkpoint-final` **only for the resume session** (`S{SESSION_N-1}`), and prunes stale seeded ckpts right after seeding (`prune_old_session_checkpoints`).  
 **heal_kl_50m A→B resume worked** (resumed_step=6104 → 12207).  
 **Token pack cache:** train loader tokenizes into a flat int32 memmap (~1.6 GB per 400M) under  
 `/kaggle/working/tetraft_pack_cache` (override: `--pack-cache-dir` / `TETRAFT_PACK_CACHE`).  
 Keep the dir attached between hops to skip rebuild; a rebuild is batched-tokenizer only (no 400M in RAM).
+
+If a hop's pack write crashes (ENOSPC at the final copy, training already done): run `scripts/recover_session_pack.py` in the live kernel (renames the finished `checkpoint-final` into the pack, prunes stale ckpts, writes ledger/LATEST/curves) — no retrain; then publish as usual.
+
+If the hop crashed as a **background run** (kernel dead, no live session): the finished `train_..._Sxx/` survives in the run's **output zip**. Download it, upload the extracted `train_heal_kl_trust_400m_Sxx/` as a Dataset (e.g. `tetraft-s06-recover`), and attach it to a fresh run with `SESSION = <k>`. Auto-recovery searches `/kaggle/input` for a finished train dir and repacks when the pack lacks that session or holds a smaller/partial `checkpoint-final` (rename on the same volume; copy fallback for the `/kaggle/input` → working cross-device move, source left read-only). Minutes of compute, no retrain; then publish as usual.
 
 ---
 

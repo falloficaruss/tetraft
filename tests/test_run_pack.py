@@ -10,6 +10,7 @@ from run_pack import (
     ensure_run_root,
     find_resume_checkpoint,
     merge_run_pack,
+    prune_old_session_checkpoints,
     rebuild_curves,
     session_gate_ppl,
     session_stop_step,
@@ -154,6 +155,42 @@ def test_pack_keeps_only_latest_checkpoint(tmp_path: Path):
     resume = find_resume_checkpoint(root, session=3)
     assert resume is not None and resume.name == "checkpoint-final"
     assert resume.parent.name == "S02"
+
+
+def test_pack_delete_source_keeps_dst_content(tmp_path: Path):
+    """Same-fs delete path renames (or copies+removes) — dst must equal src."""
+    root = ensure_run_root(tmp_path / "heal_kl_trust_400m")
+    s01_ckpt = tmp_path / "train_S01" / "checkpoint-final"
+    s01_ckpt.parent.mkdir(parents=True)
+    s01_ckpt.write_bytes(b"payload-01")
+    write_session_pack(
+        root, _summary(1, 40.0), checkpoint_final_src=s01_ckpt, delete_checkpoint_source=True
+    )
+    assert (root / "sessions/S01" / "checkpoint-final").read_bytes() == b"payload-01"
+    assert not s01_ckpt.exists()
+
+
+def test_pack_keep_source_preserves_both(tmp_path: Path):
+    root = ensure_run_root(tmp_path / "heal_kl_trust_400m")
+    ckpt = tmp_path / "train_S01" / "checkpoint-final"
+    ckpt.parent.mkdir(parents=True)
+    ckpt.write_bytes(b"payload-01")
+    write_session_pack(
+        root, _summary(1, 40.0), checkpoint_final_src=ckpt, delete_checkpoint_source=False
+    )
+    assert ckpt.is_file()
+    assert (root / "sessions/S01" / "checkpoint-final").read_bytes() == b"payload-01"
+
+
+def test_prune_old_session_checkpoints_public_alias(tmp_path: Path):
+    root = ensure_run_root(tmp_path / "heal_kl_trust_400m")
+    for tag in ("S01", "S02"):
+        sdir = root / "sessions" / tag
+        sdir.mkdir(parents=True, exist_ok=True)
+        (sdir / "checkpoint-final").write_bytes(b"x")
+    prune_old_session_checkpoints(root, keep_tag="S02")
+    assert not (root / "sessions/S01/checkpoint-final").exists()
+    assert (root / "sessions/S02/checkpoint-final").is_file()
 
 
 def test_pack_no_prune_without_new_checkpoint(tmp_path: Path):

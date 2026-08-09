@@ -6,3 +6,6 @@ data/
 *.jsonl
 smoke_results.json
 linear_inventory.json
+checkpoint-final.zip
+checkpoint-final
+artifacts/

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import shutil
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Union
@@ -304,6 +305,13 @@ def _prune_old_session_checkpoints(run_root: Union[str, Path], *, keep_tag: str)
             logger.warning("Failed to prune %s: %s", ckpt, e)
 
 
+def prune_old_session_checkpoints(
+    run_root: Union[str, Path], *, keep_tag: str
+) -> None:
+    """Public alias of ``_prune_old_session_checkpoints``."""
+    _prune_old_session_checkpoints(run_root, keep_tag=keep_tag)
+
+
 def write_session_pack(
     run_root: Union[str, Path],
     summary: Dict[str, Any],
@@ -320,9 +328,11 @@ def write_session_pack(
 
     ``keep_only_latest_checkpoint`` keeps the pack bounded: after a new
     ``checkpoint-final`` lands in the pack, every older ``sessions/S*/checkpoint-final``
-    is removed. ``delete_checkpoint_source`` additionally removes the training-output
-    source checkpoint once it has been copied (both only run when a new checkpoint
-    was actually written into the pack, so LATEST.json never dangles).
+    is removed. With ``delete_checkpoint_source`` (marathon default) the new
+    checkpoint is **renamed** into the pack when src/dst share a filesystem,
+    so the hop never needs a second full copy of it (no extra disk); it falls
+    back to copy+delete across filesystems. Both only run when a new checkpoint
+    was actually written into the pack, so LATEST.json never dangles.
     """
     root = ensure_run_root(run_root, run_id=str(summary.get("run_id") or RUN_ID_TRUST_400M))
     tag = summary.get("session_tag") or session_tag(int(summary["session"]))
@@ -348,7 +358,27 @@ def write_session_pack(
         dst = sess_dir / "checkpoint-final"
         if copy_checkpoint:
             if src.resolve() != dst.resolve():
-                shutil.copy2(src, dst)
+                if delete_checkpoint_source:
+                    # Same-volume rename: ~0 kB of extra disk, so the final
+                    # pack write cannot overflow /kaggle/working at the last
+                    # step of a marathon hop.
+                    try:
+                        os.replace(src, dst)
+                    except OSError:
+                        try:
+                            shutil.copy2(src, dst)
+                        except OSError:
+                            try:
+                                dst.unlink()
+                            except OSError:
+                                pass
+                            raise
+                        try:
+                            src.unlink()
+                        except OSError as e:
+                            logger.warning("Failed to remove %s: %s", src, e)
+                else:
+                    shutil.copy2(src, dst)
             ckpt_abs = str(dst)
             ckpt_rel = str(dst.relative_to(root))
             copied_new_ckpt = True
@@ -359,16 +389,6 @@ def write_session_pack(
     if copied_new_ckpt:
         if keep_only_latest_checkpoint:
             _prune_old_session_checkpoints(root, keep_tag=tag)
-        if delete_checkpoint_source and checkpoint_final_src is not None:
-            src = Path(checkpoint_final_src)
-            if dst is not None and src.resolve() != dst.resolve():
-                try:
-                    src.unlink()
-                    logger.info(
-                        "Removed training-output checkpoint after pack copy: %s", src
-                    )
-                except OSError as e:
-                    logger.warning("Failed to remove %s: %s", src, e)
 
     ledger_row = {
         "run_id": summary.get("run_id"),
